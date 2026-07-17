@@ -1,9 +1,22 @@
 require('dotenv').config();
 const express = require('express');
 const WABot = require('./bot');
+const mongoService = require('./mongoService');
+const path = require('path');
 
 const app = express();
 const PORT = 3010; // Fixed port as requested
+
+// Global concurrent tracking state
+global.activeChatsCount = 0;
+global.recentActiveUsers = new Set(); // Track unique users in last 15 min
+
+// Grok xAI configuration store (in-memory persistent state)
+global.grokConfig = {
+    apiKey: process.env.GROK_API_KEY || '',
+    model: 'grok-2-1212',
+    enabled: false
+};
 
 // Load configuration
 const config = {
@@ -65,6 +78,167 @@ function setupErrorHandling() {
         process.exit(0);
     });
 }
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Admin redirection
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
+});
+
+// MongoDB Atlas Admin Endpoints
+app.post('/api/mongo/config', express.json(), async (req, res) => {
+    try {
+        const { name, uri, database, category, limitMb } = req.body;
+        if (!uri) {
+            return res.status(400).json({ error: 'URI is required' });
+        }
+        const config = await mongoService.addConfig({ name, uri, database, category, limitMb });
+        res.status(201).json({ success: true, data: config });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/mongo/config', (req, res) => {
+    res.json({ success: true, data: mongoService.getConfigs() });
+});
+
+app.delete('/api/mongo/config/:id', async (req, res) => {
+    try {
+        const result = await mongoService.removeConfig(req.params.id);
+        res.json({ success: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/mongo/test', express.json(), async (req, res) => {
+    try {
+        const { uri } = req.body;
+        if (!uri) {
+            return res.status(400).json({ error: 'URI is required' });
+        }
+        const result = await mongoService.testConnection(uri);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/mongo/stats', async (req, res) => {
+    try {
+        const stats = await mongoService.getAllDbStats();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Grok xAI Configuration Endpoints
+app.get('/api/grok/config', (req, res) => {
+    res.json({ success: true, data: global.grokConfig });
+});
+
+app.post('/api/grok/config', express.json(), (req, res) => {
+    try {
+        const { apiKey, model, enabled } = req.body;
+        if (apiKey !== undefined) global.grokConfig.apiKey = apiKey;
+        if (model !== undefined) global.grokConfig.model = model;
+        if (enabled !== undefined) global.grokConfig.enabled = enabled;
+
+        // Propagate changes to dynamic Grok service if required
+        if (bot && bot.grokService) {
+            bot.grokService.apiKey = global.grokConfig.apiKey;
+            bot.grokService.model = global.grokConfig.model;
+        }
+
+        res.json({ success: true, data: global.grokConfig });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Real-time system stats endpoint
+app.get('/api/admin/stats', async (req, res) => {
+    try {
+        let accountsCount = 0;
+        let wahaStatus = 'Disconnected';
+
+        if (bot && bot.activeDatabaseService) {
+            try {
+                // Fetch unique users count from active database
+                const users = await bot.activeDatabaseService.getAllUserData(1000, 0);
+                accountsCount = users.length;
+            } catch (dbError) {
+                console.error('Error fetching user count for stats:', dbError.message);
+            }
+        }
+
+        if (bot && bot.wahaService) {
+            try {
+                const conn = await bot.wahaService.checkConnection();
+                if (conn && conn.status === 'connected') {
+                    wahaStatus = 'Connected';
+                }
+            } catch (wahaError) {
+                wahaStatus = 'Disconnected';
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                accountsCount,
+                activeUsersCount: global.recentActiveUsers.size,
+                concurrentChatsCount: global.activeChatsCount,
+                wahaStatus,
+                uptime: process.uptime()
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// MCP Tools endpoints for Admin UI integration
+app.get('/api/admin/mcp/tools', async (req, res) => {
+    try {
+        if (!bot || !bot.aiChatService || !bot.aiChatService.mcpServer) {
+            return res.status(503).json({ error: 'MCP Server not available yet' });
+        }
+
+        // Expose available tools by invoking the list schema handler
+        const listRequestHandler = bot.aiChatService.mcpServer.server._requestHandlers.get('tools/list');
+        if (!listRequestHandler) {
+            return res.json({ success: true, tools: [] });
+        }
+        const toolsList = await listRequestHandler();
+        res.json({ success: true, tools: toolsList.tools || [] });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/admin/mcp/tools/execute', express.json(), async (req, res) => {
+    try {
+        const { name, arguments: args } = req.body;
+        if (!bot || !bot.aiChatService || !bot.aiChatService.mcpServer) {
+            return res.status(503).json({ error: 'MCP Server not available yet' });
+        }
+
+        const callRequestHandler = bot.aiChatService.mcpServer.server._requestHandlers.get('tools/call');
+        if (!callRequestHandler) {
+            return res.status(500).json({ error: 'Tool execution handler not registered' });
+        }
+
+        const result = await callRequestHandler({ params: { name, arguments: args } });
+        res.json({ success: true, result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

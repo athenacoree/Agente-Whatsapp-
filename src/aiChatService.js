@@ -1,4 +1,5 @@
 const GroqService = require('./groqService');
+const grokService = require('./grokService');
 const MCPServer = require('./mcpServer');
 
 class AIChatService {
@@ -69,11 +70,21 @@ Respond in the same language as the user (Indonesian or English). Be conversatio
             if (needsTools) {
                 return await this.processWithTools(userMessage, messages);
             } else {
-                // Regular AI chat without tools
-                const response = await this.groqService.chatWithContext(
-                    conversationHistory.slice(-5), // Keep last 5 messages for context
-                    userMessage
-                );
+                let response;
+                // Dynamically route between Grok xAI and Groq
+                if (grokService.isEnabled() && grokService.getClient()) {
+                    console.log('🤖 Routing chat request to Grok xAI...');
+                    response = await grokService.chatWithContext(
+                        conversationHistory.slice(-5),
+                        userMessage
+                    );
+                } else {
+                    console.log('🤖 Routing chat request to Groq API...');
+                    response = await this.groqService.chatWithContext(
+                        conversationHistory.slice(-5), // Keep last 5 messages for context
+                        userMessage
+                    );
+                }
 
                 if (response.success) {
                     return {

@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - WhatsApp Bot</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .sidebar {
+            height: 100vh;
+            background-color: #343a40;
+            color: white;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 250px;
+            padding-top: 20px;
+        }
+        .sidebar a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            display: block;
+            padding: 12px 20px;
+            font-size: 16px;
+        }
+        .sidebar a:hover, .sidebar a.active {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+            border-left: 4px solid #0d6efd;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 30px;
+        }
+        .card-stats {
+            transition: transform 0.2s;
+        }
+        .card-stats:hover {
+            transform: translateY(-5px);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="text-center mb-4">
+            <h4><i class="bi bi-robot"></i> WA AI Bot</h4>
+            <span class="badge bg-success">Admin Panel</span>
+        </div>
+        <hr class="mx-3">
+        <a href="#dashboard" class="active" onclick="switchTab('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</a>
+        <a href="#databases" onclick="switchTab('databases')"><i class="bi bi-database"></i> MongoDB Atlas</a>
+        <a href="#grok" onclick="switchTab('grok')"><i class="bi bi-cpu"></i> Configuración Grok</a>
+        <a href="#mcp" onclick="switchTab('mcp')"><i class="bi bi-tools"></i> Herramientas MCP</a>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+
+        <!-- Dashboard Section -->
+        <div id="section-dashboard" class="tab-section">
+            <h2 class="mb-4">Panel de Control</h2>
+            <div class="row g-4 mb-4">
+                <div class="col-md-3">
+                    <div class="card card-stats bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Cuentas Totales</h6>
+                                    <h3 class="mb-0" id="stat-accounts">0</h3>
+                                </div>
+                                <div class="bg-primary bg-opacity-10 text-primary p-3 rounded">
+                                    <i class="bi bi-people fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-stats bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Usuarios Activos (15m)</h6>
+                                    <h3 class="mb-0" id="stat-active">0</h3>
+                                </div>
+                                <div class="bg-success bg-opacity-10 text-success p-3 rounded">
+                                    <i class="bi bi-person-check fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-stats bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Chats Concurrentes</h6>
+                                    <h3 class="mb-0" id="stat-concurrent">0</h3>
+                                </div>
+                                <div class="bg-warning bg-opacity-10 text-warning p-3 rounded">
+                                    <i class="bi bi-chat-dots fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card card-stats bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Estado WAHA</h6>
+                                    <h3 class="mb-0 fs-5" id="stat-waha">Desconectado</h3>
+                                </div>
+                                <div class="bg-info bg-opacity-10 text-info p-3 rounded">
+                                    <i class="bi bi-whatsapp fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Databases Monitoring Mini Section -->
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-database-fill-check"></i> Estado de Almacenamiento MongoDB Atlas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="mongo-mini-list">
+                        <!-- Dynamic databases list with visual indicators -->
+                        <div class="text-center text-muted py-4">No hay bases de datos MongoDB Atlas configuradas.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Databases Section -->
+        <div id="section-databases" class="tab-section d-none">
+            <h2 class="mb-4">Conexiones MongoDB Atlas</h2>
+
+            <!-- Register DB Form -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">Agregar Base de Datos MongoDB Atlas</h5>
+                </div>
+                <div class="card-body">
+                    <form id="db-form">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label">Nombre de la Conexión</label>
+                                <input type="text" class="form-control" id="db-name" placeholder="Mi Cluster Atlas" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">URI de Conexión (Connection String)</label>
+                                <input type="text" class="form-control" id="db-uri" placeholder="mongodb+srv://..." required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Base de Datos</label>
+                                <input type="text" class="form-control" id="db-database" placeholder="wa_bot_db" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Categoría / Destino</label>
+                                <select class="form-select" id="db-category">
+                                    <option value="Usuarios Registros">Usuarios Registros</option>
+                                    <option value="Chat Logs">Chat Logs</option>
+                                    <option value="Otros" selected>Otros</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Límite de Capacidad (MB)</label>
+                                <input type="number" class="form-control" id="db-limit" value="512" required>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="button" class="btn btn-outline-secondary me-2 w-50" onclick="testDbConnection()">Probar Conexión</button>
+                                <button type="submit" class="btn btn-primary w-50">Guardar Conexión</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Connected DB list -->
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0">Bases de Datos de MongoDB Atlas Activas</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Categoría / Destino</th>
+                                    <th>Estado</th>
+                                    <th>Uso de Almacenamiento (MB / % Lleno)</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="db-table-body">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">No hay conexiones activas registradas.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grok Configuration Section -->
+        <div id="section-grok" class="tab-section d-none">
+            <h2 class="mb-4">Configuración de Grok (xAI)</h2>
+            <div class="card border-0 shadow-sm max-width-600">
+                <div class="card-body p-4">
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input" type="checkbox" role="switch" id="grok-enabled" style="width: 2.5em; height: 1.3em;">
+                        <label class="form-check-label h5 ms-2" for="grok-enabled">Activar Grok (xAI)</label>
+                        <div class="form-text">Si está activo, el Bot utilizará Grok para responder chats en lugar de Groq.</div>
+                    </div>
+                    <form id="grok-form">
+                        <div class="mb-3">
+                            <label class="form-label font-weight-bold">xAI API Key</label>
+                            <input type="password" class="form-control" id="grok-apikey" placeholder="xai-..." required>
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label font-weight-bold">Modelo Grok</label>
+                            <select class="form-select" id="grok-model">
+                                <option value="grok-2-1212">grok-2-1212 (Recomendado)</option>
+                                <option value="grok-2-latest">grok-2-latest</option>
+                                <option value="grok-beta">grok-beta</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary px-4">Guardar Configuración de Grok</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- MCP Tools Section -->
+        <div id="section-mcp" class="tab-section d-none">
+            <h2 class="mb-4">Herramientas MCP (Model Context Protocol)</h2>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0">Lista de Herramientas</h5>
+                        </div>
+                        <div class="list-group list-group-flush" id="mcp-tools-list">
+                            <!-- Dynamic MCP tools loaded here -->
+                            <div class="p-3 text-center text-muted">Cargando herramientas MCP...</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0" id="selected-tool-name">Selecciona una herramienta</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" id="selected-tool-desc">Por favor selecciona una herramienta de la lista para ver su esquema y ejecutarla manualmente.</p>
+                            <form id="mcp-execution-form" class="d-none">
+                                <div id="mcp-inputs-container" class="mb-4"></div>
+                                <button type="submit" class="btn btn-success"><i class="bi bi-play-fill"></i> Ejecutar Herramienta</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Execution Result -->
+                    <div class="card border-0 shadow-sm d-none" id="mcp-result-card">
+                        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">Resultado de la Ejecución</h5>
+                            <span class="badge bg-success">Completado</span>
+                        </div>
+                        <div class="card-body bg-light">
+                            <pre class="mb-0" id="mcp-result-content"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Bootstrap Bundle JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Tab switching navigation
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-section').forEach(section => {
+                section.classList.add('d-none');
+            });
+            document.getElementById(`section-${tabId}`).classList.remove('d-none');
+
+            document.querySelectorAll('.sidebar a').forEach(link => {
+                link.classList.remove('active');
+            });
+            const activeLink = Array.from(document.querySelectorAll('.sidebar a')).find(link => link.getAttribute('href') === `#${tabId}`);
+            if (activeLink) activeLink.classList.add('active');
+        }
+
+        // Live stats polling
+        async function fetchStats() {
+            try {
+                const res = await fetch('/api/admin/stats');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('stat-accounts').innerText = data.data.accountsCount;
+                    document.getElementById('stat-active').innerText = data.data.activeUsersCount;
+                    document.getElementById('stat-concurrent').innerText = data.data.concurrentChatsCount;
+                    document.getElementById('stat-waha').innerText = data.data.wahaStatus;
+
+                    const wahaBadge = document.getElementById('stat-waha');
+                    if (data.data.wahaStatus === 'Connected') {
+                        wahaBadge.className = 'mb-0 fs-5 text-success';
+                    } else {
+                        wahaBadge.className = 'mb-0 fs-5 text-danger';
+                    }
+                }
+            } catch (err) {
+                console.error('Stats fetch failed:', err);
+            }
+        }
+
+        // Fetch dynamic databases stats
+        async function fetchMongoStats() {
+            try {
+                const res = await fetch('/api/mongo/stats');
+                const data = await res.json();
+                if (data.success) {
+                    renderMongoList(data.data);
+                }
+            } catch (err) {
+                console.error('Mongo stats fetch failed:', err);
+            }
+        }
+
+        function renderMongoList(stats) {
+            const listContainer = document.getElementById('mongo-mini-list');
+            const tableBody = document.getElementById('db-table-body');
+
+            if (stats.length === 0) {
+                listContainer.innerHTML = '<div class="text-center text-muted py-4">No hay bases de datos MongoDB Atlas configuradas.</div>';
+                tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No hay conexiones activas registradas.</td></tr>';
+                return;
+            }
+
+            // Dashboard Mini view
+            listContainer.innerHTML = stats.map(db => {
+                const statusColor = db.status === 'Connected' ? 'bg-success' : 'bg-danger';
+                return `
+                <div class="col-md-6 mb-3">
+                    <div class="p-3 border rounded">
+                        <div class="d-flex justify-content-between mb-2">
+                            <strong>${db.name} (${db.category})</strong>
+                            <span class="badge ${statusColor}">${db.status}</span>
+                        </div>
+                        <div class="progress mb-2" style="height: 15px;">
+                            <div class="progress-bar" role="progressbar" style="width: ${db.percentUsed}%" aria-valuenow="${db.percentUsed}" aria-valuemin="0" aria-valuemax="100">${db.percentUsed}%</div>
+                        </div>
+                        <small class="text-muted">${db.storageSizeMb} MB de ${db.limitMb} MB de capacidad máxima.</small>
+                    </div>
+                </div>
+                `;
+            }).join('');
+
+            // Full table database view
+            tableBody.innerHTML = stats.map(db => {
+                const statusColor = db.status === 'Connected' ? 'bg-success' : 'bg-danger';
+                return `
+                <tr>
+                    <td>
+                        <strong>${db.name}</strong><br>
+                        <small class="text-muted">Database: ${db.database}</small>
+                    </td>
+                    <td><span class="badge bg-secondary">${db.category}</span></td>
+                    <td><span class="badge ${statusColor}">${db.status}</span></td>
+                    <td>
+                        <div style="max-width: 250px;">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small>${db.storageSizeMb} MB / ${db.limitMb} MB</small>
+                                <small class="fw-bold">${db.percentUsed}%</small>
+                            </div>
+                            <div class="progress" style="height: 8px;">
+                                <div class="progress-bar" role="progressbar" style="width: ${db.percentUsed}%" aria-valuenow="${db.percentUsed}" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteDb('${db.id}')">Eliminar</button>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        // Test database connection manually
+        async function testDbConnection() {
+            const uri = document.getElementById('db-uri').value;
+            if (!uri) {
+                alert('Por favor, ingresa una URI de MongoDB');
+                return;
+            }
+            try {
+                const res = await fetch('/api/mongo/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uri })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('✅ Conexión con MongoDB Atlas exitosa!');
+                } else {
+                    alert('❌ Error de conexión: ' + data.error);
+                }
+            } catch (err) {
+                alert('❌ Error al realizar la prueba: ' + err.message);
+            }
+        }
+
+        // Delete Database connection
+        async function deleteDb(id) {
+            if (!confirm('¿Estás seguro de que deseas eliminar esta base de datos?')) return;
+            try {
+                const res = await fetch(`/api/mongo/config/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    fetchMongoStats();
+                }
+            } catch (err) {
+                console.error('Failed to delete db:', err);
+            }
+        }
+
+        // Register Database Submit
+        document.getElementById('db-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                name: document.getElementById('db-name').value,
+                uri: document.getElementById('db-uri').value,
+                database: document.getElementById('db-database').value,
+                category: document.getElementById('db-category').value,
+                limitMb: document.getElementById('db-limit').value,
+            };
+
+            try {
+                const res = await fetch('/api/mongo/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Base de datos agregada con éxito!');
+                    document.getElementById('db-form').reset();
+                    fetchMongoStats();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al registrar: ' + err.message);
+            }
+        });
+
+        // Grok xAI Config Submit and Load
+        async function loadGrokConfig() {
+            try {
+                const res = await fetch('/api/grok/config');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('grok-enabled').checked = data.data.enabled;
+                    document.getElementById('grok-apikey').value = data.data.apiKey;
+                    document.getElementById('grok-model').value = data.data.model;
+                }
+            } catch (err) {
+                console.error('Grok load failed:', err);
+            }
+        }
+
+        document.getElementById('grok-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                enabled: document.getElementById('grok-enabled').checked,
+                apiKey: document.getElementById('grok-apikey').value,
+                model: document.getElementById('grok-model').value
+            };
+
+            try {
+                const res = await fetch('/api/grok/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Configuración de Grok guardada con éxito!');
+                }
+            } catch (err) {
+                alert('Error al guardar: ' + err.message);
+            }
+        });
+
+        // Toggle switch also triggers save
+        document.getElementById('grok-enabled').addEventListener('change', async (e) => {
+            const payload = {
+                enabled: e.target.checked
+            };
+            try {
+                await fetch('/api/grok/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch (err) {
+                console.error('Auto switch grok failed:', err);
+            }
+        });
+
+        // MCP Tools loading & interactive execution
+        let availableMcpTools = [];
+        let selectedTool = null;
+
+        async function loadMcpTools() {
+            try {
+                const res = await fetch('/api/admin/mcp/tools');
+                const data = await res.json();
+                if (data.success) {
+                    availableMcpTools = data.tools;
+                    renderMcpToolsList(data.tools);
+                }
+            } catch (err) {
+                console.error('MCP tools fetch failed:', err);
+            }
+        }
+
+        function renderMcpToolsList(tools) {
+            const toolsContainer = document.getElementById('mcp-tools-list');
+            if (tools.length === 0) {
+                toolsContainer.innerHTML = '<div class="p-3 text-center text-muted">No hay herramientas MCP registradas.</div>';
+                return;
+            }
+
+            toolsContainer.innerHTML = tools.map(tool => {
+                return `
+                <button type="button" class="list-group-item list-group-item-action py-3" onclick="selectMcpTool('${tool.name}')">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h6 class="mb-1 text-primary fw-bold">${tool.name}</h6>
+                    </div>
+                    <small class="text-muted d-block text-truncate" style="max-width: 250px;">${tool.description}</small>
+                </button>
+                `;
+            }).join('');
+        }
+
+        function selectMcpTool(toolName) {
+            selectedTool = availableMcpTools.find(t => t.name === toolName);
+            if (!selectedTool) return;
+
+            document.getElementById('selected-tool-name').innerText = selectedTool.name;
+            document.getElementById('selected-tool-desc').innerText = selectedTool.description;
+
+            const form = document.getElementById('mcp-execution-form');
+            const inputsContainer = document.getElementById('mcp-inputs-container');
+
+            form.classList.remove('d-none');
+            inputsContainer.innerHTML = '';
+            document.getElementById('mcp-result-card').classList.add('d-none');
+
+            // Generate dynamic inputs based on JSON schema properties
+            const props = selectedTool.inputSchema.properties || {};
+            const required = selectedTool.inputSchema.required || [];
+
+            Object.entries(props).forEach(([propName, propDef]) => {
+                const isRequired = required.includes(propName);
+                let inputHtml = `
+                <div class="mb-3">
+                    <label class="form-label fw-bold">${propName} ${isRequired ? '<span class="text-danger">*</span>' : ''}</label>
+                `;
+
+                if (propDef.type === 'array') {
+                    inputHtml += `<input type="text" class="form-control mcp-input" data-name="${propName}" data-type="array" placeholder="Ingresa valores separados por comas (ej. item1, item2)" ${isRequired ? 'required' : ''}>`;
+                } else if (propDef.type === 'number') {
+                    inputHtml += `<input type="number" class="form-control mcp-input" data-name="${propName}" data-type="number" value="${propDef.default || ''}" ${isRequired ? 'required' : ''}>`;
+                } else if (propDef.enum) {
+                    inputHtml += `
+                    <select class="form-select mcp-input" data-name="${propName}" data-type="select">
+                        ${propDef.enum.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                    </select>
+                    `;
+                } else {
+                    inputHtml += `<input type="text" class="form-control mcp-input" data-name="${propName}" data-type="string" value="${propDef.default || ''}" ${isRequired ? 'required' : ''}>`;
+                }
+
+                inputHtml += `<div class="form-text text-muted">${propDef.description || ''}</div></div>`;
+                inputsContainer.innerHTML += inputHtml;
+            });
+        }
+
+        // Execute MCP Tool Form Submit
+        document.getElementById('mcp-execution-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!selectedTool) return;
+
+            const args = {};
+            document.querySelectorAll('.mcp-input').forEach(input => {
+                const name = input.getAttribute('data-name');
+                const type = input.getAttribute('data-type');
+                const value = input.value;
+
+                if (value === '' && !input.hasAttribute('required')) return;
+
+                if (type === 'array') {
+                    args[name] = value.split(',').map(v => v.trim()).filter(v => v !== '');
+                } else if (type === 'number') {
+                    args[name] = parseFloat(value);
+                } else {
+                    args[name] = value;
+                }
+            });
+
+            try {
+                const res = await fetch('/api/admin/mcp/tools/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: selectedTool.name,
+                        arguments: args
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('mcp-result-card').classList.remove('d-none');
+                    document.getElementById('mcp-result-content').innerText = JSON.stringify(data.result, null, 2);
+                } else {
+                    alert('Error en la ejecución: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al ejecutar herramienta: ' + err.message);
+            }
+        });
+
+        // Initialize polling and configurations on startup
+        fetchStats();
+        fetchMongoStats();
+        loadGrokConfig();
+        loadMcpTools();
+
+        setInterval(fetchStats, 5000); // Poll general stats every 5s
+        setInterval(fetchMongoStats, 10000); // Poll MongoDB Atlas stats every 10s
+    </script>
+</body>
+</html>
