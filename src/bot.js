@@ -120,12 +120,17 @@ class WABot {
 
             if (this.simulationMode) {
                 console.log('🔧 Simulation mode: Skipping WAHA connection check');
+                this.startNudgeDaemon();
                 return true;
             }
 
             console.log('Checking WAHA connection...');
             const status = await this.wahaService.checkConnection();
             console.log('WAHA connection status:', status);
+
+            // Start the inactivity nudge daemon
+            this.startNudgeDaemon();
+
             return true;
         } catch (error) {
             console.error('Failed to initialize WAHA service:', error);
@@ -289,6 +294,88 @@ class WABot {
             // Check if this is a bot command OR user is in an active menu state
             const userId = this.getConversationKey(parsedMessage.chatId, parsedMessage.from);
 
+            // Fetch registration and profile info
+            const profile = await this.getOrCreateUserProfile(parsedMessage.chatId, parsedMessage.senderName);
+            let profileData = {};
+            if (profile && profile.data_json) {
+                profileData = typeof profile.data_json === 'string' ? JSON.parse(profile.data_json) : profile.data_json;
+            }
+            const isRegistered = profileData.is_registered === true;
+
+            // Handle referral tracking before checking registration status
+            const refMatch = parsedMessage.content.match(/ref_([a-zA-Z0-9@.-]+)/);
+            if (refMatch && !isRegistered) {
+                const referrerId = refMatch[1];
+                profileData.referred_by = referrerId;
+                await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, { data: profileData });
+                console.log(`User ${parsedMessage.chatId} was referred by ${referrerId}`);
+            }
+
+            // Unregistered user restriction and registration flow handling
+            if (!isRegistered) {
+                const lowerContent = parsedMessage.content.toLowerCase().trim();
+                const isStartingRegistration = lowerContent === 'registrarme' || lowerContent === 'registrar' || lowerContent === 'registro' || lowerContent === 'si' || lowerContent === 'sí' || lowerContent === 'yes' || lowerContent === 'aceptar' || profileData.registration_step;
+
+                if (isStartingRegistration) {
+                    this.isProcessing.add(processingKey);
+                    global.activeChatsCount = (global.activeChatsCount || 0) + 1;
+                    try {
+                        await this.handleRegistrationFlow(parsedMessage, profile, parsedMessage.content);
+                        return;
+                    } finally {
+                        this.isProcessing.delete(processingKey);
+                        global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
+                    }
+                }
+
+                // If asking about system capabilities
+                const isAskingCapabilities = lowerContent.includes('que puedes hacer') || lowerContent.includes('quien eres') || lowerContent.includes('cómo funciona') || lowerContent.includes('como funciona') || lowerContent.includes('help') || lowerContent.includes('ayuda') || lowerContent.includes('info');
+
+                if (isAskingCapabilities) {
+                    this.isProcessing.add(processingKey);
+                    global.activeChatsCount = (global.activeChatsCount || 0) + 1;
+                    try {
+                        await this.sendTypingIndicator(parsedMessage.chatId);
+                        const restrictedPrompt = `You are a WhatsApp AI Bot. The user is currently UNREGISTERED. You are only allowed to explain how the system works and what it can do. Under no circumstances should you provide any database records, documents, statuses, or confidential information. You must be polite and encourage the user to register by typing "registrarme" to unlock all features. Answer in the same language as the user: "${parsedMessage.content}".`;
+
+                        let response;
+                        if (this.grokService.isEnabled() && this.grokService.getClient()) {
+                            response = await this.grokService.chatCompletion([
+                                { role: 'system', content: restrictedPrompt },
+                                { role: 'user', content: parsedMessage.content }
+                            ]);
+                        } else {
+                            response = await this.groqService.chatCompletion([
+                                { role: 'system', content: restrictedPrompt },
+                                { role: 'user', content: parsedMessage.content }
+                            ]);
+                        }
+
+                        if (response.success) {
+                            await this.wahaService.sendMessage(parsedMessage.chatId, response.content);
+                        } else {
+                            await this.wahaService.sendMessage(parsedMessage.chatId, "¡Hola! Soy un bot asistente de IA. Para chatear normalmente y usar mis funciones avanzadas, debes registrarte escribiendo *registrarme*.");
+                        }
+                        return;
+                    } finally {
+                        this.isProcessing.delete(processingKey);
+                        global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
+                    }
+                }
+
+                // If any other message, ask them to register
+                this.isProcessing.add(processingKey);
+                global.activeChatsCount = (global.activeChatsCount || 0) + 1;
+                try {
+                    const currentPolicies = global.aiSettings?.privacyPolicy || "Políticas de seguridad y privacidad.";
+                    await this.wahaService.sendMessage(parsedMessage.chatId, `🤖 *¡Hola! Bienvenido al Bot Asistente de IA.*\n\nPara poder chatear normalmente y utilizar mis herramientas, debes crear una cuenta rápida desde aquí.\n\nPara comenzar, debes aceptar nuestras políticas de privacidad y seguridad:\n\n"${currentPolicies}"\n\n👉 Escribe *ACEPTAR* o *SI* para iniciar el registro.`);
+                    return;
+                } finally {
+                    this.isProcessing.delete(processingKey);
+                    global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
+                }
+            }
+
             // Track active user in last 15 min globally
             global.recentActiveUsers = global.recentActiveUsers || new Set();
             global.recentActiveUsers.add(userId);
@@ -319,6 +406,135 @@ class WABot {
                 console.log(`Processing command from ${parsedMessage.senderName} in ${parsedMessage.isGroup ? 'group' : 'private'} chat (Concurrent: ${global.activeChatsCount})`);
 
                 const userMessage = this.extractUserMessage(parsedMessage.content);
+                const lowerMsg = userMessage.toLowerCase().trim();
+
+                // 1. Check if user is in pending sex change reason state
+                if (profileData.awaiting_sex_change_reason) {
+                    await this.sendTypingIndicator(parsedMessage.chatId);
+                    const pendingNewSex = profileData.pending_new_sex;
+
+                    const evalPrompt = `Evalúa si la siguiente explicación es un motivo válido para cambiar el sexo de un usuario en su perfil a "${pendingNewSex}". La explicación es: "${userMessage}". Sé empático y justo. Si el motivo es razonable (corrección de un error al registrarse, transición de género, etc.), aprueba el cambio. Responde exactamente en el formato: "APROBADO: <explicación amable>" o "RECHAZADO: <explicación amable de por qué no se considera válido>".`;
+
+                    let aiResponse;
+                    if (this.grokService.isEnabled() && this.grokService.getClient()) {
+                        aiResponse = await this.grokService.chatCompletion([
+                            { role: 'system', content: evalPrompt },
+                            { role: 'user', content: userMessage }
+                        ]);
+                    } else {
+                        aiResponse = await this.groqService.chatCompletion([
+                            { role: 'system', content: evalPrompt },
+                            { role: 'user', content: userMessage }
+                        ]);
+                    }
+
+                    const responseText = aiResponse.success ? aiResponse.content : 'APROBADO: Solicitud procesada automáticamente.';
+
+                    if (responseText.toUpperCase().startsWith('APROBADO')) {
+                        profileData.sex = pendingNewSex;
+                        const aiMsg = responseText.replace(/^APROBADO:?/i, '').trim();
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `✅ *Cambio de Sexo Aprobado*\n\nLa IA ha evaluado y aprobado tu motivo:\n"${aiMsg}"\n\n⚧️ Tu sexo ha sido actualizado a: *${pendingNewSex}*.`);
+                    } else {
+                        const aiMsg = responseText.replace(/^RECHAZADO:?/i, '').trim();
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `❌ *Cambio de Sexo Rechazado*\n\nLa IA ha evaluado tu motivo y lo ha rechazado:\n"${aiMsg}"\n\nNo se realizaron cambios en tu perfil.`);
+                    }
+
+                    delete profileData.awaiting_sex_change_reason;
+                    delete profileData.pending_new_sex;
+                    await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, { data: profileData });
+                    return;
+                }
+
+                // 2. Profile Alteration and Referral Commands
+                if (lowerMsg === 'referido' || lowerMsg === 'recomendar') {
+                    // Count referrals
+                    let myReferidosCount = 0;
+                    try {
+                        const allUsers = await this.activeDatabaseService.getAllUserData(1000, 0);
+                        const myReferidos = allUsers.filter(u => {
+                            let uData = {};
+                            try {
+                                uData = typeof u.data_json === 'string' ? JSON.parse(u.data_json) : (u.data_json || {});
+                            } catch (e) {
+                                // Sometimes returned as object or string
+                            }
+                            return uData.referred_by === parsedMessage.chatId || uData.referred_by === parsedMessage.chatId.replace('@c.us', '');
+                        });
+                        myReferidosCount = myReferidos.length;
+                    } catch (err) {
+                        console.error('Error counting referrals:', err);
+                    }
+
+                    const botNum = this.getBotNumber();
+                    const cleanMyId = parsedMessage.chatId.replace('@c.us', '');
+                    const refLink = `https://wa.me/${botNum}?text=ref_${cleanMyId}`;
+
+                    await this.wahaService.sendMessage(parsedMessage.chatId, `🔗 *Tu Enlace de Referido Personalizado:*\n${refLink}\n\n👥 *Estadísticas de Referidos:*\nHas traído a *${myReferidosCount}* usuario(s) a este bot.\n\n¡Comparte este enlace para que se registren bajo tu recomendación! 😊`);
+                    return;
+                }
+
+                if (lowerMsg.startsWith('cambiar nombre ')) {
+                    const newName = userMessage.substring(15).trim();
+                    const nameWords = newName.split(/\s+/);
+
+                    if (nameWords.length < 2) {
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `⚠️ El nombre de reemplazo debe incluir nombre y apellidos (mínimo dos palabras).`);
+                        return;
+                    }
+
+                    try {
+                        const results = await this.activeDatabaseService.searchUserData(newName, 'name');
+                        const isTaken = results.some(u => {
+                            const uData = u.data_json || {};
+                            return u.chat_id !== parsedMessage.chatId && uData.is_registered && u.user_name.toLowerCase() === newName.toLowerCase();
+                        });
+
+                        if (isTaken) {
+                            await this.wahaService.sendMessage(parsedMessage.chatId, `⚠️ Lo siento, el nombre *${newName}* ya está registrado por otro usuario.`);
+                            return;
+                        }
+
+                        profileData.fullName = newName;
+                        await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, {
+                            userName: newName,
+                            data: profileData
+                        });
+
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `✅ *Nombre Actualizado*\n\nTu nombre en el bot ha sido cambiado exitosamente a: *${newName}*.`);
+                    } catch (err) {
+                        console.error('Error changing name:', err);
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `❌ Error al cambiar tu nombre. Por favor intenta de nuevo.`);
+                    }
+                    return;
+                }
+
+                if (lowerMsg.startsWith('cambiar sexo ')) {
+                    const newSex = userMessage.substring(13).trim();
+                    if (!newSex) {
+                        await this.wahaService.sendMessage(parsedMessage.chatId, `⚠️ Por favor especifica el nuevo sexo. Ejemplo: *cambiar sexo Femenino*`);
+                        return;
+                    }
+
+                    profileData.awaiting_sex_change_reason = true;
+                    profileData.pending_new_sex = newSex;
+                    await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, { data: profileData });
+
+                    await this.wahaService.sendMessage(parsedMessage.chatId, `⚧️ Para cambiar tu sexo a *${newSex}*, por favor responde a este mensaje explicando detalladamente la razón de este cambio.\n\nLa IA evaluará si es un motivo válido antes de actualizar tu perfil.`);
+                    return;
+                }
+
+                // 3. Live Interaction Matchmaking Flow and Commands
+                const isMatchmakingCommand = lowerMsg === 'live interaccion' ||
+                                             lowerMsg === 'desactivar live interaccion' ||
+                                             lowerMsg === 'ver candidatos' ||
+                                             lowerMsg === 'ver candidato' ||
+                                             profileData.live_interaction_state ||
+                                             profileData.current_candidate;
+
+                if (isMatchmakingCommand) {
+                    await this.handleLiveInteraction(parsedMessage, profileData, userMessage);
+                    return;
+                }
 
                 // Handle data commands (.data, .1, .2, .3, .4, .5, .help)
                 if (this.isDataCommand(userMessage)) {
@@ -388,6 +604,24 @@ class WABot {
                 // Get conversation history
                 const conversationKey = this.getConversationKey(parsedMessage.chatId, parsedMessage.from);
                 const history = this.getConversationHistory(conversationKey);
+
+                // Check if the message requires tools (long-running background task)
+                const needsTools = this.aiChatService.checkIfToolsNeeded(userMessage);
+
+                if (needsTools) {
+                    // Send dynamic immediate non-blocking responses
+                    if (this.simulationMode) {
+                        console.log(`🔧 [SIMULATION] Immediate response 1 to ${parsedMessage.senderName}: Espera un momento...`);
+                        console.log(`🔧 [SIMULATION] Immediate response 2 to ${parsedMessage.senderName}: Pero bueno, podemos seguir hablando mientras se completa la tarea.`);
+                    } else {
+                        await this.wahaService.sendMessage(parsedMessage.chatId, "Espera un momento...");
+                        await this.wahaService.sendMessage(parsedMessage.chatId, "Pero bueno, podemos seguir hablando mientras se completa la tarea.");
+                    }
+
+                    // Process task in background (non-blocking)
+                    this.processBackgroundTask(parsedMessage, userMessage, history, conversationKey);
+                    return;
+                }
 
                 // Show typing indicator
                 await this.sendTypingIndicator(parsedMessage.chatId);
@@ -1856,6 +2090,467 @@ Tidak ada status pekerjaan untuk tanggal ini, sehingga tidak dapat dibuat lapora
 
             return '❌ Terjadi kesalahan saat memproses laporan status AI. Silakan coba lagi.';
         }
+    }
+
+    async getOrCreateUserProfile(chatId, senderName) {
+        if (!this.activeDatabaseService) return null;
+        try {
+            let profile = await this.activeDatabaseService.getUserData(chatId);
+            if (profile && typeof profile.data_json === 'string') {
+                try {
+                    profile.data_json = JSON.parse(profile.data_json);
+                } catch (e) {}
+            }
+            if (!profile) {
+                // Initialize as unregistered
+                profile = await this.activeDatabaseService.upsertUserData(chatId, {
+                    userName: senderName,
+                    phoneNumber: chatId.replace('@c.us', '').replace('@g.us', ''),
+                    data: {
+                        is_registered: false,
+                        registration_step: 'awaiting_policies'
+                    },
+                    tags: ['new-user']
+                });
+            }
+            return profile;
+        } catch (error) {
+            console.error('Error getting or creating user profile:', error);
+            return null;
+        }
+    }
+
+    async handleRegistrationFlow(parsedMessage, profile, userMessage) {
+        const chatId = parsedMessage.chatId;
+        const data = profile.data_json || {};
+        const step = data.registration_step || 'awaiting_policies';
+
+        // Check if user wants to see policies or skip/cancel
+        const lowerMsg = userMessage.toLowerCase().trim();
+
+        // Load Privacy Policy from settings
+        const currentPolicies = global.aiSettings?.privacyPolicy || "Políticas de seguridad y privacidad.";
+
+        switch (step) {
+            case 'awaiting_policies':
+                if (lowerMsg === 'aceptar' || lowerMsg === 'si' || lowerMsg === 'sí' || lowerMsg === 'yes' || lowerMsg === 'ok') {
+                    data.registration_step = 'awaiting_name';
+                    await this.activeDatabaseService.upsertUserData(chatId, { data });
+                    await this.wahaService.sendMessage(chatId, `✅ Has aceptado las políticas de seguridad y privacidad.\n\n👤 Paso 2/6: Por favor, dime tu *Nombre y Apellidos* reales.\n\n💡 _Nota: Es mejor usar tu nombre real para futuras funcionalidades de tu cuenta._`);
+                } else {
+                    await this.wahaService.sendMessage(chatId, `⚠️ Para utilizar el bot, debes aceptar las políticas de seguridad y privacidad.\n\nEscribe *ACEPTAR* o *SI* para continuar.\n\nPolíticas:\n${currentPolicies}`);
+                }
+                break;
+
+            case 'awaiting_name':
+                // Clean name: should be at least two words (name and surname) as requested: "que sea nombre y apellidos"
+                const nameWords = userMessage.trim().split(/\s+/);
+                if (nameWords.length < 2) {
+                    await this.wahaService.sendMessage(chatId, `⚠️ Por favor, introduce tu nombre y apellidos (mínimo dos palabras).\n\nEjemplo: *Juan Pérez*`);
+                    return;
+                }
+
+                const fullName = userMessage.trim();
+
+                // Check if name is already taken by a registered user
+                try {
+                    const results = await this.activeDatabaseService.searchUserData(fullName, 'name');
+                    const isTaken = results.some(u => {
+                        const uData = u.data_json || {};
+                        return u.chat_id !== chatId && uData.is_registered;
+                    });
+
+                    if (isTaken) {
+                        await this.wahaService.sendMessage(chatId, `⚠️ Lo siento, el nombre *${fullName}* ya está registrado por otro usuario. Por favor, ingresa un nombre diferente o añade tu segundo apellido.`);
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Error checking name uniqueness:', e);
+                }
+
+                data.fullName = fullName;
+                data.registration_step = 'awaiting_country';
+                await this.activeDatabaseService.upsertUserData(chatId, {
+                    userName: fullName,
+                    data
+                });
+
+                await this.wahaService.sendMessage(chatId, `👤 ¡Mucho gusto, *${fullName}*!\n\n🌍 Paso 3/6: ¿De qué *país* eres?\n\n💡 _Escribe tu país o escribe *OMITIR* si prefieres no dar este dato._`);
+                break;
+
+            case 'awaiting_country':
+                if (lowerMsg === 'omitir') {
+                    data.country = null;
+                    data.registration_step = 'awaiting_age'; // If country is skipped, skip location too
+                    await this.wahaService.sendMessage(chatId, `🎂 Paso 5/6: ¿Cuál es tu *edad*?\n\n⚠️ _Nota: Este dato no podrá ser modificado más adelante._`);
+                } else {
+                    data.country = userMessage.trim();
+                    data.registration_step = 'awaiting_location';
+                    await this.wahaService.sendMessage(chatId, `🌍 Registrado: *${data.country}*.\n\n📍 Paso 4/6: ¿De qué *provincia, municipio o estado* eres de ese país?\n\n💡 _Escribe tu ubicación o escribe *OMITIR* si prefieres no dar este dato._`);
+                }
+                await this.activeDatabaseService.upsertUserData(chatId, { data });
+                break;
+
+            case 'awaiting_location':
+                if (lowerMsg === 'omitir') {
+                    data.location = null;
+                } else {
+                    data.location = userMessage.trim();
+                }
+                data.registration_step = 'awaiting_age';
+                await this.activeDatabaseService.upsertUserData(chatId, { data });
+                await this.wahaService.sendMessage(chatId, `🎂 Paso 5/6: ¿Cuál es tu *edad*?\n\n⚠️ _Nota: Este dato no podrá ser modificado más adelante._`);
+                break;
+
+            case 'awaiting_age':
+                const age = parseInt(userMessage.trim());
+                if (isNaN(age) || age <= 0 || age > 120) {
+                    await this.wahaService.sendMessage(chatId, `⚠️ Por favor, ingresa una edad válida en números.\n\nEjemplo: *25*`);
+                    return;
+                }
+
+                data.age = age;
+                data.registration_step = 'awaiting_sex';
+                await this.activeDatabaseService.upsertUserData(chatId, { data });
+                await this.wahaService.sendMessage(chatId, `⚧️ Paso 6/6: ¿Cuál es tu *sexo*?\n\n💡 _Escribe tu sexo (ej: Masculino, Femenino, Otro). Nota: Para cambiar este dato en el futuro, deberás explicarle el motivo a la IA para su aprobación._`);
+                break;
+
+            case 'awaiting_sex':
+                const sex = userMessage.trim();
+                data.sex = sex;
+                data.is_registered = true;
+                delete data.registration_step;
+
+                await this.activeDatabaseService.upsertUserData(chatId, {
+                    data,
+                    tags: ['registered']
+                });
+
+                await this.wahaService.sendMessage(chatId, `🎉 *¡Felicidades, tu registro se ha completado con éxito!*
+
+👤 Nombre: ${data.fullName}
+🌍 País: ${data.country || 'No especificado'}
+📍 Ubicación: ${data.location || 'No especificado'}
+🎂 Edad: ${data.age}
+⚧️ Sexo: ${data.sex}
+
+📲 *IMPORTANTE:* Para asegurar el correcto funcionamiento del bot, *debes guardar mi número de teléfono en tu lista de contactos* de tu celular.
+
+Ahora que estás registrado, puedes chatear conmigo normalmente y usar todas mis funcionalidades avanzadas como la consulta de bases de datos, informes, live interacción, ¡y más! 😊`);
+                break;
+        }
+    }
+
+    async handleLiveInteraction(parsedMessage, profileData, userMessage) {
+        const chatId = parsedMessage.chatId;
+        const lowerMsg = userMessage.toLowerCase().trim();
+
+        // 1. If not yet in live interaction survey but wants to activate
+        if (!profileData.live_interaction_state && !profileData.live_interaction_active) {
+            profileData.live_interaction_state = 'survey_intro';
+            await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+            await this.wahaService.sendMessage(chatId, `💞 *Bienvenido a Live Interacción* 💞\n\nEsta funcionalidad te permite emparejarte con personas de tus mismos gustos con tu permiso mutuo.\n\nPara comenzar, debes completar una breve encuesta descriptiva y proporcionar una foto que la IA compartirá únicamente con tus candidatos.\n\n👉 ¿Deseas iniciar la encuesta ahora? Responde con *SI* o *NO*.`);
+            return;
+        }
+
+        // 2. Survey state machine
+        const state = profileData.live_interaction_state;
+
+        if (state === 'survey_intro') {
+            if (lowerMsg === 'si' || lowerMsg === 'sí' || lowerMsg === 'yes' || lowerMsg === 'ok') {
+                profileData.live_interaction_state = 'awaiting_self_desc';
+                await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                await this.wahaService.sendMessage(chatId, `📝 *Paso 1/3: Descríbete a ti mismo.*\n\nPor favor, escribe un párrafo describiendo tu personalidad, intereses, pasatiempos y lo que consideres importante de ti.`);
+            } else {
+                delete profileData.live_interaction_state;
+                await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                await this.wahaService.sendMessage(chatId, `❌ Se ha cancelado la activación de Live Interacción. Puedes volver a intentarlo escribiendo *live interaccion* cuando quieras.`);
+            }
+            return;
+        }
+
+        if (state === 'awaiting_self_desc') {
+            profileData.match_self_desc = userMessage.trim();
+            profileData.live_interaction_state = 'awaiting_partner_desc';
+            await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+            await this.wahaService.sendMessage(chatId, `🎯 *Paso 2/3: Describe a tu persona ideal.*\n\n¿Cómo te gustaría que fuera la otra persona? Describe sus cualidades, intereses o gustos afines.`);
+            return;
+        }
+
+        if (state === 'awaiting_partner_desc') {
+            profileData.match_partner_desc = userMessage.trim();
+            profileData.live_interaction_state = 'awaiting_photo';
+            await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+            await this.wahaService.sendMessage(chatId, `📸 *Paso 3/3: Proporciona tu fotografía.*\n\nPor favor, sube una foto de perfil o envíala como imagen en este chat.\n\n⚠️ _IMPORTANTE: Al enviar la foto, confirmas y autorizas que la IA la use y se la muestre a otros candidatos para realizar emparejamientos._\n\nEscribe *ACEPTAR FOTO* o envía la imagen para finalizar.`);
+            return;
+        }
+
+        if (state === 'awaiting_photo') {
+            profileData.match_photo_consent = true;
+            profileData.live_interaction_active = true;
+            delete profileData.live_interaction_state;
+
+            // Initialize viewed and likes tracking
+            profileData.viewed_candidates = [];
+            profileData.likes_sent = [];
+
+            await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+            await this.wahaService.sendMessage(chatId, `🎉 *¡Excelente! Tu perfil de Live Interacción está activo.* 🎉\n\nHas completado la encuesta correctamente.\n\n🔍 Para ver candidatos disponibles en tu ubicación, escribe *ver candidatos*.\n\n❌ Si deseas revocar o desactivar esta función en cualquier momento, escribe *desactivar live interaccion*.`);
+            return;
+        }
+
+        // 3. Candidate actions when live interaction is active
+        if (profileData.live_interaction_active) {
+            // If they are answering yes/no to a current candidate
+            if (profileData.current_candidate) {
+                const candidateId = profileData.current_candidate;
+                delete profileData.current_candidate; // Clear immediately
+
+                if (lowerMsg === 'si' || lowerMsg === 'sí' || lowerMsg === 'yes' || lowerMsg === 'like') {
+                    // Record like
+                    profileData.likes_sent = profileData.likes_sent || [];
+                    profileData.likes_sent.push({ to: candidateId, time: Date.now() });
+
+                    await this.wahaService.sendMessage(chatId, `💖 ¡Has indicado que te interesa esta persona!`);
+
+                    // Check if it's a mutual match (MASH)
+                    let candidateProfile = await this.activeDatabaseService.getUserData(candidateId);
+                    let candidateData = candidateProfile ? (candidateProfile.data_json || {}) : {};
+                    let candidateLikes = candidateData.likes_sent || [];
+
+                    const hasMutualLike = candidateLikes.some(like => like.to === chatId);
+
+                    if (hasMutualLike) {
+                        // MUTUAL MATCH!
+                        const now = Date.now();
+                        profileData.last_match_time = now;
+                        candidateData.last_match_time = now;
+
+                        // Save updated profiles
+                        await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                        await this.activeDatabaseService.upsertUserData(candidateId, { data: candidateData });
+
+                        // Notify user A
+                        const candidateName = candidateData.fullName || candidateProfile.user_name || "Candidato";
+                        const candidatePhone = candidateProfile.phone_number || candidateId.replace('@c.us', '');
+                        await this.wahaService.sendMessage(chatId, `🎉 *¡Felicidades! ¡Hay MATCH mutuo (MASH)!* 🎉\n\nAmbos han aprobado el emparejamiento. Aquí tienes sus datos de contacto:\n\n👤 Nombre: *${candidateName}*\n📱 WhatsApp: *wa.me/${candidatePhone}*\n\n¡Escríbele para comenzar a hablar! 😉`);
+
+                        // Notify user B
+                        const myProfile = await this.activeDatabaseService.getUserData(chatId);
+                        const myName = profileData.fullName || myProfile.user_name || "Candidato";
+                        const myPhone = myProfile.phone_number || chatId.replace('@c.us', '');
+                        await this.wahaService.sendMessage(candidateId, `🎉 *¡Felicidades! ¡Hay MATCH mutuo (MASH)!* 🎉\n\nAmbos han aprobado el emparejamiento. Aquí tienes sus datos de contacto:\n\n👤 Nombre: *${myName}*\n📱 WhatsApp: *wa.me/${myPhone}*\n\n¡Escríbele para comenzar a hablar! 😉`);
+                    } else {
+                        // Save profile
+                        await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                        await this.wahaService.sendMessage(chatId, `Esperando a que la otra persona también te apruebe. Si es mutuo, ¡se intercambiarán los contactos! 😊`);
+                    }
+                } else {
+                    await this.wahaService.sendMessage(chatId, `No hay problema, seguiremos buscando más candidatos para ti. Escribe *ver candidatos* para ver al siguiente.`);
+                    await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                }
+                return;
+            }
+
+            // Command to fetch next candidate
+            if (lowerMsg === 'ver candidatos' || lowerMsg === 'ver candidato') {
+                // Check limits: 1 successful match in 24 hours
+                const lastMatchTime = profileData.last_match_time || 0;
+                if (Date.now() - lastMatchTime < 24 * 60 * 60 * 1000) {
+                    await this.wahaService.sendMessage(chatId, `⚠️ *Límite de Matches:* Ya has logrado un emparejamiento exitoso en las últimas 24 horas. Para cuidar las interacciones, puedes tener un máximo de 1 match por día. ¡Intenta mañana de nuevo!`);
+                    return;
+                }
+
+                // Check limits: 2 candidates viewed in last 24 hours
+                profileData.viewed_candidates = profileData.viewed_candidates || [];
+                const viewedLast24h = profileData.viewed_candidates.filter(vc => Date.now() - vc.time < 24 * 60 * 60 * 1000);
+
+                if (viewedLast24h.length >= 2) {
+                    await this.wahaService.sendMessage(chatId, `⚠️ *Límite de Candidatos:* Has visto tu límite diario de 2 candidatos en las últimas 24 horas. Vuelve en un día para ver más candidatos. ¡Gracias por tu paciencia!`);
+                    return;
+                }
+
+                // Find candidate matching location (country/location)
+                try {
+                    const allUsers = await this.activeDatabaseService.getAllUserData(1000, 0);
+                    const candidates = [];
+
+                    for (const u of allUsers) {
+                        if (u.chat_id === chatId) continue;
+
+                        let uData = {};
+                        try {
+                            uData = typeof u.data_json === 'string' ? JSON.parse(u.data_json) : (u.data_json || {});
+                        } catch (e) {
+                            continue;
+                        }
+
+                        if (!uData.is_registered || !uData.live_interaction_active) continue;
+
+                        // Check if already viewed in history (even if older than 24h)
+                        const alreadyViewed = profileData.viewed_candidates.some(vc => vc.id === u.chat_id);
+                        if (alreadyViewed) continue;
+
+                        // Check matching country/location
+                        const sameCountry = uData.country && profileData.country && uData.country.toLowerCase() === profileData.country.toLowerCase();
+
+                        candidates.push({
+                            id: u.chat_id,
+                            data: uData,
+                            score: sameCountry ? 2 : 1
+                        });
+                    }
+
+                    // Sort candidates by match quality
+                    candidates.sort((a, b) => b.score - a.score);
+
+                    if (candidates.length === 0) {
+                        await this.wahaService.sendMessage(chatId, `🔍 No hemos encontrado nuevos candidatos disponibles en tu zona por el momento. ¡Intenta de nuevo más tarde!`);
+                        return;
+                    }
+
+                    const match = candidates[0];
+                    profileData.current_candidate = match.id;
+                    profileData.viewed_candidates.push({ id: match.id, time: Date.now() });
+
+                    await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+
+                    await this.wahaService.sendMessage(chatId, `💞 *¡Candidato Encontrado!* 💞
+
+📍 Ubicación: ${match.data.location || 'No especificado'}, ${match.data.country || 'No especificado'}
+🎂 Edad: ${match.data.age || 'No especificada'}
+⚧️ Sexo: ${match.data.sex || 'No especificado'}
+
+📝 *Descripción personal:*
+"${match.data.match_self_desc}"
+
+🎯 *Lo que busca:*
+"${match.data.match_partner_desc}"
+
+📸 [Imagen de perfil compartida]
+
+👉 ¿Te gustaría emparejarte con esta persona? Responde con *SI* o *NO*.`);
+                } catch (err) {
+                    console.error('Error finding candidate:', err);
+                    await this.wahaService.sendMessage(chatId, `❌ Ocurrió un error al buscar candidatos.`);
+                }
+                return;
+            }
+
+            // Command to deactivate live interaction
+            if (lowerMsg === 'desactivar live interaccion') {
+                profileData.live_interaction_active = false;
+                delete profileData.current_candidate;
+                await this.activeDatabaseService.upsertUserData(chatId, { data: profileData });
+                await this.wahaService.sendMessage(chatId, `❌ *Live Interacción Desactivado*\n\nHas desactivado el matchmaking. Ya no aparecerás en las búsquedas de otros candidatos ni recibirás sugerencias.\n\nPuedes reactivarlo en cualquier momento escribiendo *live interaccion*.`);
+                return;
+            }
+        }
+    }
+
+    getBotNumber() {
+        const envPhone = process.env.BOT_PHONE;
+        if (envPhone) return envPhone;
+        const settingsPhone = global.aiSettings?.botPhone;
+        if (settingsPhone) return settingsPhone;
+        return 'bot_phone';
+    }
+
+    async processBackgroundTask(parsedMessage, userMessage, history, conversationKey) {
+        try {
+            const response = await this.aiChatService.processMessage(userMessage, history);
+            if (response.success) {
+                let responseText = response.content;
+                if (response.usedTools) {
+                    responseText += '\n\n🔧 *Processed with AI tools*';
+                }
+
+                if (this.simulationMode) {
+                    console.log(`🔧 [SIMULATION] Background task result to ${parsedMessage.senderName}: ${responseText}`);
+                } else {
+                    await this.wahaService.sendMessage(parsedMessage.chatId, responseText);
+                }
+
+                // Update history
+                this.addToHistory(conversationKey, 'user', userMessage);
+                this.addToHistory(conversationKey, 'assistant', responseText);
+
+                // Log to database
+                await this.logMessageToDatabase(parsedMessage, responseText);
+            } else {
+                const errMsg = `⚠️ Disculpa, hubo un problema al completar la tarea de fondo: ${response.error}`;
+                if (this.simulationMode) {
+                    console.log(`🔧 [SIMULATION] Background task error: ${errMsg}`);
+                } else {
+                    await this.wahaService.sendMessage(parsedMessage.chatId, errMsg);
+                }
+            }
+        } catch (error) {
+            console.error('Error processing background task:', error);
+        }
+    }
+
+    startNudgeDaemon(intervalMs = 60 * 1000) {
+        // Run nudge check immediately on start, then periodically
+        const check = async () => {
+            try {
+                if (!this.activeDatabaseService || !this.activeDatabaseService.initialized) return;
+
+                const users = await this.activeDatabaseService.getAllUserData(1000, 0);
+                const now = Date.now();
+
+                for (const u of users) {
+                    let uData = {};
+                    try {
+                        uData = typeof u.data_json === 'string' ? JSON.parse(u.data_json) : (u.data_json || {});
+                    } catch (e) {
+                        continue;
+                    }
+
+                    // Check for inactivity in registration or matchmaking survey
+                    const regStep = uData.registration_step;
+                    const isRegistered = uData.is_registered === true;
+                    const liveStep = uData.live_interaction_state;
+
+                    const lastUpdated = new Date(u.updated_at).getTime();
+                    const inactiveDuration = now - lastUpdated;
+
+                    // Nudge after 5 minutes of inactivity (300,000 ms) and haven't nudged yet
+                    if (inactiveDuration > 5 * 60 * 1000 && !uData.nudge_sent) {
+                        if (regStep && !isRegistered) {
+                            uData.nudge_sent = true;
+                            await this.activeDatabaseService.upsertUserData(u.chat_id, { data: uData });
+
+                            if (this.simulationMode) {
+                                console.log(`🔧 [SIMULATION] Sending registration nudge to ${u.chat_id}`);
+                            } else {
+                                await this.wahaService.sendMessage(u.chat_id, `👋 ¡Hola! He notado que te quedaste a medias en el proceso de registro.\n\nSi deseas continuar, solo responde a este mensaje para completar tu cuenta de IA. 😊`);
+                            }
+                        } else if (liveStep) {
+                            uData.nudge_sent = true;
+                            await this.activeDatabaseService.upsertUserData(u.chat_id, { data: uData });
+
+                            if (this.simulationMode) {
+                                console.log(`🔧 [SIMULATION] Sending matchmaking nudge to ${u.chat_id}`);
+                            } else {
+                                await this.wahaService.sendMessage(u.chat_id, `👋 ¡Hola! Noté que no completaste tu encuesta de Live Interacción.\n\nResponde a este chat para terminar de activar tu perfil de parejas. 💞`);
+                            }
+                        }
+                    }
+
+                    // Reset nudge flag if they became active again (any message logs update their updated_at)
+                    if (inactiveDuration < 1 * 60 * 1000 && uData.nudge_sent) {
+                        delete uData.nudge_sent;
+                        await this.activeDatabaseService.upsertUserData(u.chat_id, { data: uData });
+                    }
+                }
+            } catch (err) {
+                console.error('Error in nudge daemon check:', err.message);
+            }
+        };
+
+        setInterval(check, intervalMs);
+        setTimeout(check, 5000); // Trigger first check after 5s
     }
 
     // Get spam statistics for monitoring

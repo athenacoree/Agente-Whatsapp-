@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const WABot = require('./bot');
 const mongoService = require('./mongoService');
+const settingsService = require('./settingsService');
 const path = require('path');
 
 const app = express();
@@ -131,6 +132,77 @@ app.get('/api/mongo/stats', async (req, res) => {
     try {
         const stats = await mongoService.getAllDbStats();
         res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Settings and Outbound Configuration Endpoints
+app.get('/api/admin/settings', (req, res) => {
+    res.json({ success: true, data: settingsService.getSettings() });
+});
+
+app.post('/api/admin/settings', express.json(), (req, res) => {
+    try {
+        const updated = settingsService.saveSettings(req.body);
+        res.json({ success: true, data: updated });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/admin/outbound/send', express.json(), async (req, res) => {
+    try {
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not initialized' });
+        }
+
+        const settings = settingsService.getSettings();
+        const { numbers, messageTemplate } = settings.outbound;
+
+        if (!numbers || !Array.isArray(numbers) || numbers.length === 0) {
+            return res.status(400).json({ error: 'No outbound numbers configured' });
+        }
+
+        const results = [];
+        for (let num of numbers) {
+            num = num.trim();
+            if (!num) continue;
+            // Ensure format has @c.us
+            let chatId = num;
+            if (!chatId.includes('@')) {
+                chatId = `${chatId}@c.us`;
+            }
+
+            try {
+                // If the user does not exist in our system, save them first with a marker/state
+                // indicating we initiated contact with them
+                if (bot.activeDatabaseService) {
+                    const existing = await bot.activeDatabaseService.getUserData(chatId);
+                    if (!existing) {
+                        await bot.activeDatabaseService.upsertUserData(chatId, {
+                            userName: `Usuario ${num}`,
+                            phoneNumber: num,
+                            tags: ['outbound-initiated'],
+                            data: {
+                                is_registered: false,
+                                outbound_initiated: true,
+                                outbound_message_sent: true,
+                                outbound_message_time: new Date().toISOString()
+                            }
+                        });
+                    }
+                }
+
+                await bot.wahaService.sendMessage(chatId, messageTemplate);
+                results.push({ number: num, status: 'sent' });
+            } catch (err) {
+                console.error(`Failed to send outbound message to ${num}:`, err.message);
+                results.push({ number: num, status: 'failed', error: err.message });
+            }
+        }
+
+        res.json({ success: true, results });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

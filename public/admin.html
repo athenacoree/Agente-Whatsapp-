@@ -59,6 +59,9 @@
         <a href="#databases" onclick="switchTab('databases')"><i class="bi bi-database"></i> MongoDB Atlas</a>
         <a href="#grok" onclick="switchTab('grok')"><i class="bi bi-cpu"></i> Configuración Grok</a>
         <a href="#mcp" onclick="switchTab('mcp')"><i class="bi bi-tools"></i> Herramientas MCP</a>
+        <a href="#personality" onclick="switchTab('personality')"><i class="bi bi-chat-quote"></i> Personalidad AI</a>
+        <a href="#policies" onclick="switchTab('policies')"><i class="bi bi-shield-lock"></i> Políticas y Registro</a>
+        <a href="#outbound" onclick="switchTab('outbound')"><i class="bi bi-broadcast"></i> Campañas Outbound</a>
     </div>
 
     <!-- Main Content -->
@@ -285,6 +288,84 @@
                             <pre class="mb-0" id="mcp-result-content"></pre>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Personality Section -->
+        <div id="section-personality" class="tab-section d-none">
+            <h2 class="mb-4">Personalidad de la IA</h2>
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body">
+                    <form id="personality-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Instrucción de Personalidad Central (System Prompt)</label>
+                            <textarea class="form-control" id="personality-central" rows="5" required></textarea>
+                            <div class="form-text">Define el comportamiento central, nombre y directivas de la IA en WhatsApp.</div>
+                        </div>
+                        <h5 class="mt-4 mb-3">Sub-Personalidades / Tonos Dinámicos</h5>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Tono Sonriente 😊 (Smiling)</label>
+                                <textarea class="form-control" id="tone-smiling" rows="3" required></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Tono Enojado 😠 (Angry)</label>
+                                <textarea class="form-control" id="tone-angry" rows="3" required></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Tono Triste 😢 (Sad)</label>
+                                <textarea class="form-control" id="tone-sad" rows="3" required></textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Tono Formal 💼 (Formal)</label>
+                                <textarea class="form-control" id="tone-formal" rows="3" required></textarea>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary mt-4 px-4">Guardar Configuración de Personalidad</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Privacy Policy Section -->
+        <div id="section-policies" class="tab-section d-none">
+            <h2 class="mb-4">Políticas de Privacidad y Seguridad</h2>
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <form id="policies-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Texto de las Políticas de Privacidad y Seguridad</label>
+                            <textarea class="form-control" id="policy-text" rows="10" required></textarea>
+                            <div class="form-text">Este texto se le presentará a los nuevos usuarios en WhatsApp durante su proceso de registro obligatorio.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary px-4">Guardar Políticas</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Outbound Campaigns Section -->
+        <div id="section-outbound" class="tab-section d-none">
+            <h2 class="mb-4">Campañas Outbound (Inicio de Chat por la IA)</h2>
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body">
+                    <form id="outbound-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Números de Teléfono Destinatarios</label>
+                            <textarea class="form-control" id="outbound-numbers" rows="4" placeholder="Ingresa los números separados por comas (ej: 54911223344, 346112233)" required></textarea>
+                            <div class="form-text">Ingresa los números de de teléfono con código de país. La IA les escribirá proactivamente a estos números.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Plantilla de Mensaje Inicial</label>
+                            <textarea class="form-control" id="outbound-template" rows="3" required></textarea>
+                            <div class="form-text">Mensaje inicial que la IA enviará. Luego, si el usuario responde, se iniciará el proceso de registro interactivo.</div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <button type="submit" class="btn btn-primary px-4">Guardar Configuración de Outbound</button>
+                            <button type="button" class="btn btn-success px-4" onclick="triggerOutboundCampaign()"><i class="bi bi-send-fill"></i> Lanzar Campaña de Mensajes</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -648,11 +729,120 @@
             }
         });
 
+        // Load settings
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/admin/settings');
+                const data = await res.json();
+                if (data.success && data.data) {
+                    const settings = data.data;
+                    document.getElementById('personality-central').value = settings.personality.centralPrompt || '';
+                    document.getElementById('tone-smiling').value = settings.personality.tones?.smiling || '';
+                    document.getElementById('tone-angry').value = settings.personality.tones?.angry || '';
+                    document.getElementById('tone-sad').value = settings.personality.tones?.sad || '';
+                    document.getElementById('tone-formal').value = settings.personality.tones?.formal || '';
+                    document.getElementById('policy-text').value = settings.privacyPolicy || '';
+                    document.getElementById('outbound-numbers').value = settings.outbound?.numbers?.join(', ') || '';
+                    document.getElementById('outbound-template').value = settings.outbound?.messageTemplate || '';
+                }
+            } catch (err) {
+                console.error('Settings load failed:', err);
+            }
+        }
+
+        // Save Personality Configuration
+        document.getElementById('personality-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                personality: {
+                    centralPrompt: document.getElementById('personality-central').value,
+                    tones: {
+                        smiling: document.getElementById('tone-smiling').value,
+                        angry: document.getElementById('tone-angry').value,
+                        sad: document.getElementById('tone-sad').value,
+                        formal: document.getElementById('tone-formal').value
+                    }
+                }
+            };
+            await saveSettings(payload, 'Configuración de personalidad guardada con éxito');
+        });
+
+        // Save Policies Configuration
+        document.getElementById('policies-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                privacyPolicy: document.getElementById('policy-text').value
+            };
+            await saveSettings(payload, 'Políticas de privacidad guardadas con éxito');
+        });
+
+        // Save Outbound Configuration
+        document.getElementById('outbound-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const numbers = document.getElementById('outbound-numbers').value
+                .split(',')
+                .map(num => num.trim())
+                .filter(num => num !== '');
+
+            const payload = {
+                outbound: {
+                    numbers: numbers,
+                    messageTemplate: document.getElementById('outbound-template').value
+                }
+            };
+            await saveSettings(payload, 'Configuración de campaña outbound guardada con éxito');
+        });
+
+        async function saveSettings(payload, successMsg) {
+            try {
+                const res = await fetch('/api/admin/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('✅ ' + successMsg);
+                    loadSettings();
+                } else {
+                    alert('❌ Error al guardar la configuración: ' + data.error);
+                }
+            } catch (err) {
+                alert('❌ Error de comunicación: ' + err.message);
+            }
+        }
+
+        // Trigger Outbound Campaign
+        async function triggerOutboundCampaign() {
+            if (!confirm('¿Estás seguro de que deseas enviar los mensajes de la campaña outbound ahora mismo?')) {
+                return;
+            }
+            try {
+                const res = await fetch('/api/admin/outbound/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    let resultsStr = 'Campaña finalizada con éxito:\n\n';
+                    data.results.forEach(r => {
+                        resultsStr += `• Número ${r.number}: ${r.status === 'sent' ? 'Enviado ✅' : 'Falló ❌ (' + r.error + ')'}\n`;
+                    });
+                    alert(resultsStr);
+                } else {
+                    alert('❌ Error al lanzar la campaña: ' + data.error);
+                }
+            } catch (err) {
+                alert('❌ Error de comunicación: ' + err.message);
+            }
+        }
+
         // Initialize polling and configurations on startup
         fetchStats();
         fetchMongoStats();
         loadGrokConfig();
         loadMcpTools();
+        loadSettings();
 
         setInterval(fetchStats, 5000); // Poll general stats every 5s
         setInterval(fetchMongoStats, 10000); // Poll MongoDB Atlas stats every 10s
