@@ -55,11 +55,44 @@ When users ask questions or make requests in natural language (Indonesian or Eng
 Respond in the same language as the user (Indonesian or English). Be conversational and helpful!`;
     }
 
+    getDynamicSystemPrompt() {
+        const settings = global.aiSettings || {
+            personality: {
+                centralPrompt: "Eres un asistente de IA amigable y empático para WhatsApp. Te adaptas al tono de conversación del usuario.",
+                tones: {
+                    smiling: "Responde de manera alegre, entusiasta, con emojis sonrientes 😊 y palabras positivas.",
+                    angry: "Mantén un tono serio, directo y firme, pero respetuoso. Evita rodeos.",
+                    sad: "Responde con empatía profunda, tono suave y consolador, demostrando comprensión y apoyo.",
+                    formal: "Sé extremadamente formal, profesional y educado en tu respuesta."
+                }
+            }
+        };
+
+        const central = settings.personality.centralPrompt;
+        const tones = settings.personality.tones || {};
+
+        return `SYSTEM DIRECTIVES & PERSONALITY:
+${central}
+
+DYNAMIC TONE ADAPTATION INSTRUCTIONS:
+Analyze the user's message tone or emotional state. You must adopt the matching sub-personality tone below for your reply:
+- If the user is expressing anger, frustration, or severe directness: Adhere to the ANGRY/SERIOUS tone: "${tones.angry || ''}"
+- If the user is expressing sadness, grief, vulnerability, or hurt: Adhere to the SAD/EMPATHETIC tone: "${tones.sad || ''}"
+- If the user is speaking in a very formal, business, or strictly professional manner: Adhere to the FORMAL tone: "${tones.formal || ''}"
+- For all other friendly, neutral, or enthusiastic conversations: Adhere to the SMILING/HAPPY tone: "${tones.smiling || ''}"
+
+Ensure your core helpfulness, capabilities, and language preference are preserved.
+
+${this.systemPrompt}`;
+    }
+
     async processMessage(userMessage, conversationHistory = []) {
         try {
+            const dynamicPrompt = this.getDynamicSystemPrompt();
+
             // Prepare conversation history with system prompt
             const messages = [
-                { role: 'system', content: this.systemPrompt },
+                { role: 'system', content: dynamicPrompt },
                 ...conversationHistory.slice(-10), // Keep last 10 messages for context
                 { role: 'user', content: userMessage }
             ];
@@ -73,17 +106,11 @@ Respond in the same language as the user (Indonesian or English). Be conversatio
                 let response;
                 // Dynamically route between Grok xAI and Groq
                 if (grokService.isEnabled() && grokService.getClient()) {
-                    console.log('🤖 Routing chat request to Grok xAI...');
-                    response = await grokService.chatWithContext(
-                        conversationHistory.slice(-5),
-                        userMessage
-                    );
+                    console.log('🤖 Routing chat request to Grok xAI with custom personality...');
+                    response = await grokService.chatCompletion(messages);
                 } else {
-                    console.log('🤖 Routing chat request to Groq API...');
-                    response = await this.groqService.chatWithContext(
-                        conversationHistory.slice(-5), // Keep last 5 messages for context
-                        userMessage
-                    );
+                    console.log('🤖 Routing chat request to Groq API with custom personality...');
+                    response = await this.groqService.chatCompletion(messages);
                 }
 
                 if (response.success) {

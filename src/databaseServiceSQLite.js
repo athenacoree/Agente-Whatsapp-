@@ -101,6 +101,28 @@ class DatabaseServiceSQLite {
     async upsertUserData(chatId, userData) {
         if (!this.initialized) throw new Error('Database not initialized');
 
+        // Retrieve existing user data to perform a safe merge
+        let existingData = {};
+        let existingTags = [];
+        let existingName = null;
+        let existingPhone = null;
+        try {
+            const existing = await this.getUserData(chatId);
+            if (existing) {
+                existingData = existing.data_json || {};
+                existingTags = existing.tags || [];
+                existingName = existing.user_name;
+                existingPhone = existing.phone_number;
+            }
+        } catch (err) {
+            console.error('Error fetching existing SQLite user data for merge:', err);
+        }
+
+        const mergedData = { ...existingData, ...(userData.data || {}) };
+        const mergedTags = [...new Set([...existingTags, ...(userData.tags || [])])];
+        const finalName = userData.userName || existingName;
+        const finalPhone = userData.phoneNumber || existingPhone;
+
         const query = `
             INSERT INTO user_data (chat_id, user_name, phone_number, data_json, tags)
             VALUES (?, ?, ?, ?, ?)
@@ -114,10 +136,10 @@ class DatabaseServiceSQLite {
 
         const values = [
             chatId,
-            userData.userName || null,
-            userData.phoneNumber || null,
-            JSON.stringify(userData.data || {}),
-            JSON.stringify(userData.tags || [])
+            finalName,
+            finalPhone,
+            JSON.stringify(mergedData),
+            JSON.stringify(mergedTags)
         ];
 
         return new Promise((resolve, reject) => {
