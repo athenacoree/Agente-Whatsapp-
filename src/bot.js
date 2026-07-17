@@ -9,11 +9,13 @@ const DocumentMenuService = require('./documentMenuService');
 const StatusService = require('./statusService');
 const StatusAIService = require('./statusAIService');
 const AIChatService = require('./aiChatService');
+const grokService = require('./grokService');
 
 class WABot {
     constructor(config) {
         this.wahaService = new WAHAService(config.wahaApiUrl, config.wahaSessionName, config.wahaApiKey);
         this.groqService = new GroqService(config.groqApiKey);
+        this.grokService = grokService;
         this.commandKey = config.botCommandKey;
         this.botName = config.botName;
         this.simulationMode = config.simulationMode || false;
@@ -286,6 +288,16 @@ class WABot {
 
             // Check if this is a bot command OR user is in an active menu state
             const userId = this.getConversationKey(parsedMessage.chatId, parsedMessage.from);
+
+            // Track active user in last 15 min globally
+            global.recentActiveUsers = global.recentActiveUsers || new Set();
+            global.recentActiveUsers.add(userId);
+            setTimeout(() => {
+                if (global.recentActiveUsers) {
+                    global.recentActiveUsers.delete(userId);
+                }
+            }, 15 * 60 * 1000); // Expirar en 15 minutos
+
             const isInDataMenuState = this.dataMenuService && this.dataMenuService.userMenuStates &&
                                      this.dataMenuService.userMenuStates.has(userId);
             const isInDocumentMenuState = this.documentMenuService && this.documentMenuService.userMenuStates &&
@@ -300,8 +312,11 @@ class WABot {
 
             this.isProcessing.add(processingKey);
 
+            // Track concurrent active processing count globally
+            global.activeChatsCount = (global.activeChatsCount || 0) + 1;
+
             try {
-                console.log(`Processing command from ${parsedMessage.senderName} in ${parsedMessage.isGroup ? 'group' : 'private'} chat`);
+                console.log(`Processing command from ${parsedMessage.senderName} in ${parsedMessage.isGroup ? 'group' : 'private'} chat (Concurrent: ${global.activeChatsCount})`);
 
                 const userMessage = this.extractUserMessage(parsedMessage.content);
 
@@ -430,10 +445,12 @@ class WABot {
 
             } finally {
                 this.isProcessing.delete(processingKey);
+                global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
             }
 
         } catch (error) {
             console.error('Error handling message:', error);
+            global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
         }
     }
 
@@ -947,33 +964,64 @@ Send \`.data\` to return to main menu.`;
 
     // Log message to database
     async logMessageToDatabase(parsedMessage, responseContent = null) {
-        if (!this.activeDatabaseService || !this.activeDatabaseService.initialized) return;
+        // Log to PostgreSQL/SQLite
+        if (this.activeDatabaseService && this.activeDatabaseService.initialized) {
+            try {
+                await this.activeDatabaseService.logMessage({
+                    messageId: parsedMessage.id,
+                    chatId: parsedMessage.chatId,
+                    senderName: parsedMessage.senderName,
+                    messageContent: parsedMessage.content,
+                    messageType: 'text',
+                    responseContent: responseContent
+                });
 
-        try {
-            await this.activeDatabaseService.logMessage({
-                messageId: parsedMessage.id,
-                chatId: parsedMessage.chatId,
-                senderName: parsedMessage.senderName,
-                messageContent: parsedMessage.content,
-                messageType: 'text',
-                responseContent: responseContent
-            });
+                // Update or create user data
+                await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, {
+                    userName: parsedMessage.senderName,
+                    phoneNumber: parsedMessage.chatId.replace('@c.us', '').replace('@g.us', ''),
+                    data: {
+                        lastMessage: parsedMessage.content,
+                        lastMessageTime: new Date().toISOString(),
+                        totalMessages: await this.getUserMessageCount(parsedMessage.chatId)
+                    },
+                    tags: this.extractTagsFromMessage(parsedMessage.content)
+                });
+            } catch (error) {
+                console.error('Error logging message to local SQL database:', error);
+            }
+        }
 
-            // Update or create user data
-            await this.activeDatabaseService.upsertUserData(parsedMessage.chatId, {
-                userName: parsedMessage.senderName,
-                phoneNumber: parsedMessage.chatId.replace('@c.us', '').replace('@g.us', ''),
-                data: {
-                    lastMessage: parsedMessage.content,
-                    lastMessageTime: new Date().toISOString(),
-                    totalMessages: await this.getUserMessageCount(parsedMessage.chatId)
-                },
-                tags: this.extractTagsFromMessage(parsedMessage.content)
-            });
+        // Save dynamically to MongoDB Atlas if connections are active
+        const mongoService = require('./mongoService');
+        if (mongoService && mongoService.getConfigs().length > 0) {
+            try {
+                const userDataObj = {
+                    chatId: parsedMessage.chatId,
+                    userName: parsedMessage.senderName,
+                    phoneNumber: parsedMessage.chatId.replace('@c.us', '').replace('@g.us', ''),
+                    data: {
+                        lastMessage: parsedMessage.content,
+                        lastMessageTime: new Date().toISOString(),
+                    },
+                    tags: this.extractTagsFromMessage(parsedMessage.content)
+                };
 
-        } catch (error) {
-            console.error('Error logging message to database:', error);
-            // Don't throw error, just log it as database logging is not critical
+                const chatLogObj = {
+                    messageId: parsedMessage.id,
+                    chatId: parsedMessage.chatId,
+                    senderName: parsedMessage.senderName,
+                    messageContent: parsedMessage.content,
+                    messageType: 'text',
+                    responseContent: responseContent
+                };
+
+                // Non-blocking fire-and-forget save to MongoDB Atlas
+                mongoService.saveUserData(userDataObj).catch(err => console.error('Atlas User Save fail:', err));
+                mongoService.saveChatLog(chatLogObj).catch(err => console.error('Atlas ChatLog Save fail:', err));
+            } catch (mongoError) {
+                console.error('Error executing MongoDB Atlas logging:', mongoError);
+            }
         }
     }
 
