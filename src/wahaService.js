@@ -37,6 +37,9 @@ class WAHAService {
 
     async checkConnection() {
         try {
+            console.log(`🔍 WAHAService: Checking connection to WAHA at ${this.apiUrl}...`);
+            console.log(`🔍 WAHAService: API Key used: ${this.apiKey ? `${this.apiKey.substring(0, 4)}... (length: ${this.apiKey.length})` : 'undefined/null'}`);
+
             // Try different authentication methods
             const authMethods = this.apiKey ? ['apikey', 'bearer', 'custom'] : ['none'];
 
@@ -60,7 +63,7 @@ class WAHAService {
                         this.client = client; // Store the working client
                         return { status: 'connected', endpoint, authMethod };
                     } catch (err) {
-                        console.log(`⚠️ Endpoint ${endpoint} failed with ${authMethod}:`, err.response?.status);
+                        console.log(`⚠️ Endpoint ${endpoint} failed with ${authMethod}: status=${err.response?.status}, error=${err.message}`);
                         continue;
                     }
                 }
