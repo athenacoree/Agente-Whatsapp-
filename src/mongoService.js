@@ -56,7 +56,8 @@ class MongoService {
         try {
             const client = new MongoClient(config.uri, {
                 connectTimeoutMS: 5000,
-                socketTimeoutMS: 5000
+                socketTimeoutMS: 5000,
+                tls: true
             });
             await client.connect();
             this.connections[config.id] = client;
@@ -71,7 +72,8 @@ class MongoService {
         try {
             const client = new MongoClient(uri, {
                 connectTimeoutMS: 5000,
-                socketTimeoutMS: 5000
+                socketTimeoutMS: 5000,
+                tls: true
             });
             await client.connect();
             // Ping the database

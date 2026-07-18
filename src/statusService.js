@@ -6,12 +6,18 @@ class StatusService {
 
     async initialize() {
         try {
+            if (!this.db || !this.db.initialized || !this.db.db) {
+                console.warn('⚠️ MongoDB DatabaseService is not initialized or connected. Status Service running in degraded/disabled mode.');
+                this.initialized = false;
+                return false;
+            }
             await this.createStatusTables();
             this.initialized = true;
             console.log('✅ Status Service initialized successfully with MongoDB');
             return true;
         } catch (error) {
             console.error('❌ Status Service initialization failed:', error);
+            this.initialized = false;
             return false;
         }
     }
