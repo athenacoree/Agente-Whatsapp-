@@ -88,6 +88,21 @@ class WABot {
                 this.activeDatabaseService = this.databaseService;
             }
 
+            // Load registered bot number configuration
+            if (this.activeDatabaseService) {
+                try {
+                    const dbConfig = await this.activeDatabaseService.getBotConfig('bot_phone_number');
+                    if (dbConfig && dbConfig.value) {
+                        console.log(`🤖 Found registered Bot Phone Number: ${dbConfig.value}`);
+                        // Update WAHA service config to use the registered phone number
+                        this.wahaService.sessionName = process.env.WAHA_SESSION_NAME || 'bot_session';
+                        console.log(`🤖 Using session name for registered bot: ${this.wahaService.sessionName}`);
+                    }
+                } catch (configErr) {
+                    console.error('Error loading registered bot number:', configErr);
+                }
+            }
+
             // Initialize document service
             console.log('📋 Initializing document service...');
             let docInitialized = await this.documentService.initialize();

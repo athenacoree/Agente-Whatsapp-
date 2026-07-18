@@ -77,7 +77,17 @@ class DatabaseServiceSQLite {
                 processed INTEGER DEFAULT 0
             );
 
+            -- Bot config table for storing persistent bot-specific configuration (like registered bot number)
+            CREATE TABLE IF NOT EXISTS bot_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT UNIQUE NOT NULL,
+                value TEXT,
+                verified INTEGER DEFAULT 0,
+                registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             -- Create indexes for better performance
+            CREATE INDEX IF NOT EXISTS idx_bot_config_key ON bot_config(key);
             CREATE INDEX IF NOT EXISTS idx_user_data_chat_id ON user_data(chat_id);
             CREATE INDEX IF NOT EXISTS idx_message_logs_chat_id ON message_logs(chat_id);
             CREATE INDEX IF NOT EXISTS idx_message_logs_timestamp ON message_logs(timestamp);
@@ -386,6 +396,58 @@ class DatabaseServiceSQLite {
 📊 Data: ${Object.keys(data).length > 0 ? JSON.stringify(data, null, 2).substring(0, 200) + '...' : 'No additional data'}
 
 ---`;
+    }
+
+    // Bot config operations
+    async getBotConfig(key) {
+        if (!this.initialized) throw new Error('Database not initialized');
+        const query = 'SELECT * FROM bot_config WHERE key = ?';
+        return new Promise((resolve, reject) => {
+            this.db.get(query, [key], (err, row) => {
+                if (err) {
+                    console.error('Error getting bot config:', err);
+                    reject(err);
+                } else {
+                    if (row) {
+                        row.verified = !!row.verified;
+                    }
+                    resolve(row || null);
+                }
+            });
+        });
+    }
+
+    async setBotConfig(key, value, verified = false) {
+        if (!this.initialized) throw new Error('Database not initialized');
+        const query = `
+            INSERT INTO bot_config (key, value, verified, registered_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                verified = excluded.verified,
+                registered_at = CURRENT_TIMESTAMP
+        `;
+        const values = [key, value, verified ? 1 : 0];
+        return new Promise((resolve, reject) => {
+            const self = this;
+            this.db.run(query, values, function(err) {
+                if (err) {
+                    console.error('Error setting bot config:', err);
+                    reject(err);
+                } else {
+                    self.db.get('SELECT * FROM bot_config WHERE key = ?', [key], (err, row) => {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            if (row) {
+                                row.verified = !!row.verified;
+                            }
+                            resolve(row);
+                        }
+                    });
+                }
+            });
+        });
     }
 
     // Close database connection
