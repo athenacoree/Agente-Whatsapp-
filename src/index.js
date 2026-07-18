@@ -62,15 +62,77 @@ app.use(async (req, res, next) => {
 
 let wahaProcess = null;
 
-function startWaha() {
-    // Check if we are in the devlikeapro/waha container environment
-    // WAHA is compiled into /app/dist/main.js or /app/dist/src/main.js
-    let wahaPath = '/app/dist/main.js';
-    if (!fs.existsSync(wahaPath)) {
-        wahaPath = '/app/dist/src/main.js';
+function findWahaPath() {
+    const candidatePaths = [
+        '/app/dist/main.js',
+        '/app/dist/src/main.js',
+        '/app/main.js',
+        '/app/dist/main',
+        '../dist/main.js',
+        '../dist/src/main.js'
+    ];
+
+    for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+            return p;
+        }
     }
 
-    if (fs.existsSync(wahaPath)) {
+    // Recursive search in /app excluding bot, node_modules, and .git
+    console.log('🔍 Searching recursively for WAHA main.js in /app...');
+    try {
+        const found = [];
+        function searchDir(dir) {
+            if (dir.includes('/app/bot') || dir.includes('node_modules') || dir.includes('.git')) {
+                return;
+            }
+            if (!fs.existsSync(dir)) return;
+            const files = fs.readdirSync(dir, { withFileTypes: true });
+            for (const file of files) {
+                const fullPath = path.join(dir, file.name);
+                if (file.isDirectory()) {
+                    searchDir(fullPath);
+                } else if (file.isFile() && (file.name === 'main.js' || file.name === 'main')) {
+                    found.push(fullPath);
+                }
+            }
+        }
+        searchDir('/app');
+        if (found.length > 0) {
+            console.log(`🎯 Found matching WAHA entrypoint(s) via recursive search: ${found.join(', ')}`);
+            return found[0];
+        }
+    } catch (e) {
+        console.error('⚠️ Error searching for WAHA files:', e.message);
+    }
+
+    // List the contents of /app as a diagnostic fallback
+    console.log('📁 Printing directory contents of /app to assist diagnosis:');
+    try {
+        const listDir = (dir, depth = 0) => {
+            if (depth > 2) return; // Prevent too deep listing
+            if (!fs.existsSync(dir)) return;
+            const files = fs.readdirSync(dir, { withFileTypes: true });
+            for (const file of files) {
+                const indent = '  '.repeat(depth);
+                console.log(`${indent}- ${file.name}${file.isDirectory() ? '/' : ''}`);
+                if (file.isDirectory() && file.name !== 'node_modules' && file.name !== '.git' && file.name !== 'bot') {
+                    listDir(path.join(dir, file.name), depth + 1);
+                }
+            }
+        };
+        listDir('/app');
+    } catch (e) {
+        console.error('⚠️ Failed to list /app directory:', e.message);
+    }
+
+    return null;
+}
+
+function startWaha() {
+    const wahaPath = findWahaPath();
+
+    if (wahaPath) {
         console.log(`🚀 Found internal WAHA at ${wahaPath}. Spawning child process...`);
 
         const wahaEnv = {
@@ -83,9 +145,12 @@ function startWaha() {
             WEBHOOK_EVENTS: 'message,ack,message.any'
         };
 
+        // Dynamically compute the cwd to be the base container directory /app
+        const spawnCwd = wahaPath.startsWith('/app') ? '/app' : path.dirname(path.dirname(wahaPath));
+
         wahaProcess = spawn('node', [wahaPath], {
             env: wahaEnv,
-            cwd: '/app',
+            cwd: spawnCwd,
             stdio: 'inherit' // Inherit stdout/stderr to print WAHA's logs in Render's console
         });
 
