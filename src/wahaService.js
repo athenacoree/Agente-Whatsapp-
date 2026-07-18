@@ -5,10 +5,10 @@ class WAHAService {
         this.apiUrl = apiUrl;
         this.sessionName = sessionName;
         this.apiKey = apiKey;
-        this.client = this.createAuthClient('bearer');
+        this.client = this.createAuthClient('apikey');
     }
 
-    createAuthClient(authMethod = 'bearer') {
+    createAuthClient(authMethod = 'apikey') {
         const headers = {};
 
         if (this.apiKey) {
@@ -17,7 +17,7 @@ class WAHAService {
                     headers['Authorization'] = `Bearer ${this.apiKey}`;
                     break;
                 case 'apikey':
-                    headers['X-API-Key'] = this.apiKey;
+                    headers['X-Api-Key'] = this.apiKey;
                     break;
                 case 'basic':
                     headers['Authorization'] = `Basic ${Buffer.from(this.apiKey).toString('base64')}`;
@@ -38,7 +38,7 @@ class WAHAService {
     async checkConnection() {
         try {
             // Try different authentication methods
-            const authMethods = this.apiKey ? ['bearer', 'apikey', 'custom'] : ['none'];
+            const authMethods = this.apiKey ? ['apikey', 'bearer', 'custom'] : ['none'];
 
             // Try multiple endpoints to check WAHA connection
             const endpoints = [

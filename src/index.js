@@ -32,6 +32,11 @@ app.use(async (req, res, next) => {
             const headers = { ...req.headers };
             delete headers.host; // let axios handle Host header
 
+            // Inject WAHA_API_KEY if not provided by the client
+            if (process.env.WAHA_API_KEY && !headers['x-api-key']) {
+                headers['X-Api-Key'] = process.env.WAHA_API_KEY;
+            }
+
             // Forward request to WAHA using axios with stream
             const response = await axios({
                 method: req.method,
@@ -173,7 +178,11 @@ async function waitForWaha(url, maxRetries = 120) {
     console.log(`⏳ Waiting for internal WAHA service to start at ${url}...`);
     for (let i = 1; i <= maxRetries; i++) {
         try {
-            await axios.get(`${url}/api/sessions`, { timeout: 1000 });
+            const headers = {};
+            if (process.env.WAHA_API_KEY) {
+                headers['X-Api-Key'] = process.env.WAHA_API_KEY;
+            }
+            await axios.get(`${url}/api/sessions`, { headers, timeout: 1000 });
             console.log('✅ WAHA service is ready!');
             return true;
         } catch (err) {
