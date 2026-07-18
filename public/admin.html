@@ -56,6 +56,8 @@
         </div>
         <hr class="mx-3">
         <a href="#dashboard" class="active" onclick="switchTab('dashboard')"><i class="bi bi-speedometer2"></i> Dashboard</a>
+        <a href="#whatsapp" onclick="switchTab('whatsapp')"><i class="bi bi-whatsapp"></i> Conexiones WhatsApp</a>
+        <a href="#users" onclick="switchTab('users')"><i class="bi bi-people"></i> Gestión de Contactos</a>
         <a href="#databases" onclick="switchTab('databases')"><i class="bi bi-database"></i> MongoDB Atlas</a>
         <a href="#grok" onclick="switchTab('grok')"><i class="bi bi-cpu"></i> Configuración Grok</a>
         <a href="#mcp" onclick="switchTab('mcp')"><i class="bi bi-tools"></i> Herramientas MCP</a>
@@ -134,7 +136,7 @@
             </div>
 
             <!-- Databases Monitoring Mini Section -->
-            <div class="card border-0 shadow-sm">
+            <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-white py-3">
                     <h5 class="mb-0"><i class="bi bi-database-fill-check"></i> Estado de Almacenamiento MongoDB Atlas</h5>
                 </div>
@@ -142,6 +144,192 @@
                     <div class="row" id="mongo-mini-list">
                         <!-- Dynamic databases list with visual indicators -->
                         <div class="text-center text-muted py-4">No hay bases de datos MongoDB Atlas configuradas.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Interaction & Access Stats Section -->
+            <div class="row g-4 mb-4">
+                <div class="col-md-3">
+                    <div class="card bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Emparejamientos (Live)</h6>
+                                    <h3 class="mb-0" id="stat-live-matchmaking">0</h3>
+                                </div>
+                                <div class="bg-danger bg-opacity-10 text-danger p-3 rounded">
+                                    <i class="bi bi-heart-fill fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">MASH Exitosos</h6>
+                                    <h3 class="mb-0" id="stat-mutual-mashes">0</h3>
+                                </div>
+                                <div class="bg-warning bg-opacity-10 text-warning p-3 rounded">
+                                    <i class="bi bi-heart-arrow fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Usuarios Prohibidos</h6>
+                                    <h3 class="mb-0 text-danger" id="stat-banned-count">0</h3>
+                                </div>
+                                <div class="bg-dark bg-opacity-10 text-dark p-3 rounded">
+                                    <i class="bi bi-slash-circle fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card bg-white border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="text-muted mb-1">Accesos Especiales</h6>
+                                    <h3 class="mb-0 text-success" id="stat-special-count">0</h3>
+                                </div>
+                                <div class="bg-success bg-opacity-10 text-success p-3 rounded">
+                                    <i class="bi bi-star-fill fs-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WhatsApp Sessions Section -->
+        <div id="section-whatsapp" class="tab-section d-none">
+            <h2 class="mb-4">Vincular Cuentas de WhatsApp (QR / API)</h2>
+            <div class="row">
+                <div class="col-md-5">
+                    <!-- Create Session -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0">Agregar Nueva Cuenta WhatsApp</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="session-form">
+                                <div class="mb-3">
+                                    <label class="form-label font-weight-bold">Nombre del Canal / Sesión</label>
+                                    <input type="text" class="form-control" id="session-input-name" placeholder="ej. personal_whatsapp, ventas_wapp" required>
+                                    <div class="form-text">Usa letras, números y guión bajo.</div>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">Inicializar Sesión WAHA</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Scan QR Code UI -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0">Vincular Código QR</h5>
+                        </div>
+                        <div class="card-body text-center" id="session-qr-container">
+                            <div class="text-muted py-4">Selecciona una sesión de la tabla o inicia una nueva sesión para escanear el QR.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-7">
+                    <!-- Sessions list -->
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0">Mis WhatsApps Vinculados (Multi-Session)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Canal / ID</th>
+                                            <th>Estado WAHA</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="session-table-body">
+                                        <tr>
+                                            <td colspan="3" class="text-center text-muted py-4">Cargando sesiones de WhatsApp...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Management Section -->
+        <div id="section-users" class="tab-section d-none">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Directorio de Contactos y Accesos</h2>
+                <!-- Admin Testing Number form -->
+                <div class="bg-white p-3 rounded shadow-sm border" style="max-width: 450px;">
+                    <form id="admin-number-form" class="d-flex align-items-center g-2">
+                        <div class="me-2">
+                            <input type="text" class="form-control form-control-sm" id="admin-phone-input" placeholder="Admin Phone (ej: 346112233)" required>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-dark text-nowrap">Guardar Administrador</button>
+                    </form>
+                    <small class="text-muted d-block mt-1">Este número tendrá comandos de control de WhatsApp y recibirá reportes.</small>
+                </div>
+            </div>
+
+            <!-- Search Contacts -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-9">
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                                <input type="text" class="form-control" id="users-search-input" placeholder="Buscar contactos por Nombre, Teléfono o Tags...">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="searchUsers()">Buscar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contacts list -->
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Nombre del Contacto</th>
+                                    <th>País / Ubicación</th>
+                                    <th>Edad / Sexo</th>
+                                    <th>Nivel de Acceso</th>
+                                    <th>Matchmaking Info</th>
+                                    <th>Tags</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="users-table-body">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-4">Realiza una búsqueda o carga el directorio de contactos.</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -186,6 +374,37 @@
                             <div class="col-md-4 d-flex align-items-end">
                                 <button type="button" class="btn btn-outline-secondary me-2 w-50" onclick="testDbConnection()">Probar Conexión</button>
                                 <button type="submit" class="btn btn-primary w-50">Guardar Conexión</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Database Routing Card -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-diagram-3"></i> Enrutamiento Dinámico de Base de Datos</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">Asigna qué conexión de base de datos de MongoDB Atlas se utilizará para almacenar cada sección del sistema de forma independiente.</p>
+                    <form id="routing-form">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label font-weight-bold">📁 Almacenamiento de Usuarios Registrados</label>
+                                <select class="form-select" id="routing-users">
+                                    <option value="">-- Usar por Categoría / Predeterminado --</option>
+                                </select>
+                                <div class="form-text text-muted small">Guarda la información de perfiles, tags y registros.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label font-weight-bold">💬 Almacenamiento de Historial de Chats (Chat Logs)</label>
+                                <select class="form-select" id="routing-chatlogs">
+                                    <option value="">-- Usar por Categoría / Predeterminado --</option>
+                                </select>
+                                <div class="form-text text-muted small">Guarda los mensajes enviados y recibidos con la IA.</div>
+                            </div>
+                            <div class="col-12 text-end mt-3">
+                                <button type="submit" class="btn btn-primary">Guardar Enrutamiento Dinámico</button>
                             </div>
                         </div>
                     </form>
@@ -326,6 +545,108 @@
                     </form>
                 </div>
             </div>
+
+            <!-- Country-Specific Personalities -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-globe"></i> Configuración de Personalidad por País</h5>
+                </div>
+                <div class="card-body">
+                    <form id="country-personality-form" class="mb-3">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">País</label>
+                                <input type="text" class="form-control" id="cp-country" placeholder="ej. España, Colombia, México" required>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label">System Prompt Personalizado para el País</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="cp-prompt" placeholder="ej. Habla usando modismos locales y de manera amigable" required>
+                                    <button type="submit" class="btn btn-dark">Agregar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>País</th>
+                                    <th>Prompt Personalizado</th>
+                                    <th style="width: 80px;">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="country-personalities-table-body">
+                                <tr>
+                                    <td colspan="3" class="text-center text-muted">No hay personalidades por país configuradas.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dictionary Configuration -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-book"></i> Diccionario de Frases y Palabras Permitidas</h5>
+                </div>
+                <div class="card-body">
+                    <form id="dictionary-form">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Frases, palabras o vocabulario clave</label>
+                            <textarea class="form-control" id="dictionary-text" rows="3" placeholder="Ingresa palabras o frases que la IA podrá/deberá utilizar, separadas por comas (ej. chaval, parse, chévere, órale, vale)"></textarea>
+                            <div class="form-text">Estas palabras enriquecerán el vocabulario de la IA según el contexto de conversación.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary px-4">Guardar Diccionario</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Rules and Laws variants -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="mb-0"><i class="bi bi-bank"></i> Reglas y Leyes (Variantes por Campo)</h5>
+                </div>
+                <div class="card-body">
+                    <form id="rules-form" class="mb-4">
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="form-label font-weight-bold">Campo / Sección</label>
+                                <input type="text" class="form-control" id="rule-field" placeholder="ej. registro, matchmaking, general" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label font-weight-bold">Nombre Variante</label>
+                                <input type="text" class="form-control" id="rule-variant-name" placeholder="ej. estricto, amigable" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label font-weight-bold">Regla / Instrucción de Ley</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="rule-text" placeholder="ej. El usuario obligatoriamente debe tener más de 18 años..." required>
+                                    <button type="submit" class="btn btn-dark">Agregar Ley</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Campo/Sección</th>
+                                    <th>Nombre Variante</th>
+                                    <th>Instrucción de Ley/Regla</th>
+                                    <th style="width: 80px;">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rules-table-body">
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted">No hay reglas o variantes de ley configuradas.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Privacy Policy Section -->
@@ -410,6 +731,42 @@
             } catch (err) {
                 console.error('Stats fetch failed:', err);
             }
+
+            // Fetch live interaction / matchmaking & banned/VIP stats
+            try {
+                const res = await fetch('/api/admin/users');
+                const usersData = await res.json();
+                if (usersData.success && usersData.data) {
+                    const list = usersData.data;
+                    const matchmakingCount = list.filter(u => u.data_json?.live_interaction_active).length;
+                    const bannedCount = list.filter(u => u.accessStatus === 'banned').length;
+                    const specialCount = list.filter(u => u.accessStatus === 'special').length;
+
+                    // Compute mutual matches count (MASH) - count matches where viewed_candidates and likes have matches
+                    let mashes = 0;
+                    list.forEach(u => {
+                        const likes = u.data_json?.likes_sent || [];
+                        likes.forEach(like => {
+                            // Find candidate
+                            const candidate = list.find(cand => cand.chat_id === like.to);
+                            if (candidate) {
+                                const candLikes = candidate.data_json?.likes_sent || [];
+                                if (candLikes.some(cl => cl.to === u.chat_id)) {
+                                    mashes++;
+                                }
+                            }
+                        });
+                    });
+                    mashes = Math.floor(mashes / 2); // Divide by 2 as they are mutual pairs
+
+                    document.getElementById('stat-live-matchmaking').innerText = matchmakingCount;
+                    document.getElementById('stat-mutual-mashes').innerText = mashes;
+                    document.getElementById('stat-banned-count').innerText = bannedCount;
+                    document.getElementById('stat-special-count').innerText = specialCount;
+                }
+            } catch (err) {
+                console.error('Matchmaking stats fetch failed:', err);
+            }
         }
 
         // Fetch dynamic databases stats
@@ -425,9 +782,40 @@
             }
         }
 
+        function updateRoutingDropdowns(stats) {
+            const usersSelect = document.getElementById('routing-users');
+            const chatlogsSelect = document.getElementById('routing-chatlogs');
+            if (!usersSelect || !chatlogsSelect) return;
+
+            // Clear and reset with default option
+            usersSelect.innerHTML = '<option value="">-- Usar por Categoría / Predeterminado --</option>';
+            chatlogsSelect.innerHTML = '<option value="">-- Usar por Categoría / Predeterminado --</option>';
+
+            stats.forEach(db => {
+                const optUsers = document.createElement('option');
+                optUsers.value = db.id;
+                optUsers.textContent = `${db.name} (${db.database}) [${db.category}]`;
+                usersSelect.appendChild(optUsers);
+
+                const optChatlogs = document.createElement('option');
+                optChatlogs.value = db.id;
+                optChatlogs.textContent = `${db.name} (${db.database}) [${db.category}]`;
+                chatlogsSelect.appendChild(optChatlogs);
+            });
+
+            // Set to saved routing values from localSettings
+            if (localSettings && localSettings.databaseRouting) {
+                usersSelect.value = localSettings.databaseRouting.users || '';
+                chatlogsSelect.value = localSettings.databaseRouting.chatLogs || '';
+            }
+        }
+
         function renderMongoList(stats) {
             const listContainer = document.getElementById('mongo-mini-list');
             const tableBody = document.getElementById('db-table-body');
+
+            // Update routing dropdown selections with the newly loaded databases list
+            updateRoutingDropdowns(stats);
 
             if (stats.length === 0) {
                 listContainer.innerHTML = '<div class="text-center text-muted py-4">No hay bases de datos MongoDB Atlas configuradas.</div>';
@@ -549,6 +937,22 @@
                 }
             } catch (err) {
                 alert('Error al registrar: ' + err.message);
+            }
+        });
+
+        // Dynamic Routing Submit
+        document.getElementById('routing-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                databaseRouting: {
+                    users: document.getElementById('routing-users').value,
+                    chatLogs: document.getElementById('routing-chatlogs').value
+                }
+            };
+            try {
+                await saveSettings(payload, 'Enrutamiento dinámico de base de datos guardado con éxito!');
+            } catch (err) {
+                alert('Error al guardar enrutamiento: ' + err.message);
             }
         });
 
@@ -729,32 +1133,381 @@
             }
         });
 
-        // Load settings
+        // WhatsApp Session Management JavaScript
+        async function fetchSessions() {
+            try {
+                const res = await fetch('/api/whatsapp/sessions');
+                const data = await res.json();
+                if (data.success) {
+                    const tableBody = document.getElementById('session-table-body');
+                    if (!data.data || data.data.length === 0) {
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No hay sesiones creadas en WAHA.</td></tr>';
+                        return;
+                    }
+                    tableBody.innerHTML = data.data.map(session => {
+                        const isRunning = session.status === 'RUNNING';
+                        return `
+                        <tr>
+                            <td><strong>${session.name}</strong></td>
+                            <td><span class="badge ${isRunning ? 'bg-success' : 'bg-secondary'}">${session.status}</span></td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" onclick="showSessionQr('${session.name}')">Código QR</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="stopSession('${session.name}')">Detener</button>
+                            </td>
+                        </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error('Failed to fetch sessions:', err);
+            }
+        }
+
+        async function showSessionQr(name) {
+            const qrContainer = document.getElementById('session-qr-container');
+            qrContainer.innerHTML = '<div class="spinner-border text-primary my-4" role="status"></div><div class="text-muted">Obteniendo código QR de WAHA...</div>';
+            try {
+                const res = await fetch(`/api/whatsapp/qr/${name}`);
+                const data = await res.json();
+                if (data.success && data.qr) {
+                    if (data.qr.type === 'image') {
+                        qrContainer.innerHTML = `
+                            <img src="data:image/png;base64,${data.qr.data}" alt="Scan WhatsApp QR" class="img-fluid rounded mb-3" style="max-width: 250px;">
+                            <div class="alert alert-info py-2">Escanea este QR desde tu WhatsApp para vincular el canal *${name}*.</div>
+                        `;
+                    } else {
+                        // Raw text representation (usually raw pairing/QR value)
+                        qrContainer.innerHTML = `
+                            <div class="alert alert-dark text-break font-monospace text-start small mb-3 p-3 bg-light border">${data.qr.data}</div>
+                            <div class="alert alert-warning py-2">Muestra el string QR de WAHA. Escanea o usa vinculación directa en la API.</div>
+                        `;
+                    }
+                } else {
+                    qrContainer.innerHTML = '<div class="alert alert-danger py-2">No se pudo obtener el QR de WAHA. Asegúrate de que la sesión esté iniciada y requiera escaneo.</div>';
+                }
+            } catch (err) {
+                qrContainer.innerHTML = `<div class="alert alert-danger py-2">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function stopSession(name) {
+            if (!confirm(`¿Estás seguro de detener y eliminar la sesión de WhatsApp "${name}"?`)) return;
+            try {
+                const res = await fetch(`/api/whatsapp/sessions/${name}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Sesión "${name}" eliminada correctamente.`);
+                    fetchSessions();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                console.error('Stop session failed:', err);
+            }
+        }
+
+        document.getElementById('session-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const sessionName = document.getElementById('session-input-name').value.trim();
+            try {
+                const res = await fetch('/api/whatsapp/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionName })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Iniciando sesión "${sessionName}". Por favor, escanea el código QR.`);
+                    document.getElementById('session-form').reset();
+                    fetchSessions();
+                    setTimeout(() => showSessionQr(sessionName), 2000);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al iniciar sesión: ' + err.message);
+            }
+        });
+
+        // Users and Access Control JavaScript
+        async function searchUsers() {
+            const query = document.getElementById('users-search-input').value;
+            const tableBody = document.getElementById('users-table-body');
+            tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted"><div class="spinner-border spinner-border-sm text-primary me-2"></div>Cargando directorio de contactos...</td></tr>';
+
+            try {
+                const url = query ? `/api/admin/users?search=${encodeURIComponent(query)}` : '/api/admin/users';
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.success) {
+                    renderUsersList(data.data);
+                }
+            } catch (err) {
+                tableBody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">Error al cargar contactos: ${err.message}</td></tr>`;
+            }
+        }
+
+        function renderUsersList(users) {
+            const tableBody = document.getElementById('users-table-body');
+            if (users.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No se encontraron contactos registrados en el bot.</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = users.map(user => {
+                const d = user.data_json || {};
+                const tagsStr = user.tags && user.tags.length > 0 ? user.tags.map(t => `<span class="badge bg-secondary p-1 small me-1">${t}</span>`).join('') : '<span class="text-muted small">None</span>';
+
+                let accessBadgeClass = 'bg-primary';
+                if (user.accessStatus === 'banned') accessBadgeClass = 'bg-danger';
+                if (user.accessStatus === 'special') accessBadgeClass = 'bg-success';
+
+                let liveMatchStr = '<span class="text-muted small">No activo</span>';
+                if (d.live_interaction_active) {
+                    liveMatchStr = `<span class="text-danger small"><i class="bi bi-heart-fill"></i> Activo matchmaking</span>`;
+                }
+
+                return `
+                <tr>
+                    <td>
+                        <strong>${user.user_name || 'Contacto'}</strong><br>
+                        <small class="text-muted">${user.chat_id}</small>
+                    </td>
+                    <td><small>${d.location || 'No especificada'}, ${d.country || 'No especificado'}</small></td>
+                    <td><small>${d.age || 'No especificada'} años / ${d.sex || 'No especificado'}</small></td>
+                    <td><span class="badge ${accessBadgeClass}">${user.accessStatus.toUpperCase()}</span></td>
+                    <td>${liveMatchStr}</td>
+                    <td><div class="d-flex flex-wrap">${tagsStr}</div></td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-danger" onclick="setUserStatus('${user.chat_id}', 'banned')">Prohibir</button>
+                            <button class="btn btn-outline-success" onclick="setUserStatus('${user.chat_id}', 'special')">VIP</button>
+                            <button class="btn btn-outline-secondary" onclick="setUserStatus('${user.chat_id}', 'normal')">Normal</button>
+                            <button class="btn btn-outline-primary" onclick="syncUserContact('${user.chat_id}')" title="Agregar a contactos de WhatsApp"><i class="bi bi-person-plus-fill"></i></button>
+                        </div>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        async function setUserStatus(chatId, status) {
+            try {
+                const res = await fetch(`/api/admin/users/${chatId}/status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Nivel de acceso de usuario actualizado correctamente.');
+                    searchUsers();
+                    fetchStats();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al actualizar acceso: ' + err.message);
+            }
+        }
+
+        async function syncUserContact(chatId) {
+            try {
+                const res = await fetch(`/api/admin/users/${chatId}/add-contact`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Contacto sincronizado/agregado a WhatsApp exitosamente!');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error de sincronización: ' + err.message);
+            }
+        }
+
+        // Save Admin testing number
+        document.getElementById('admin-number-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = document.getElementById('admin-phone-input').value.trim();
+            const payload = {
+                adminPhoneNumber: phone
+            };
+            await saveSettings(payload, 'Número de administrador guardado con éxito');
+        });
+
+        // Advanced Personality, Dictionary, and Rules lists management
+        let localSettings = {};
+
         async function loadSettings() {
             try {
                 const res = await fetch('/api/admin/settings');
                 const data = await res.json();
                 if (data.success && data.data) {
-                    const settings = data.data;
-                    document.getElementById('personality-central').value = settings.personality.centralPrompt || '';
-                    document.getElementById('tone-smiling').value = settings.personality.tones?.smiling || '';
-                    document.getElementById('tone-angry').value = settings.personality.tones?.angry || '';
-                    document.getElementById('tone-sad').value = settings.personality.tones?.sad || '';
-                    document.getElementById('tone-formal').value = settings.personality.tones?.formal || '';
-                    document.getElementById('policy-text').value = settings.privacyPolicy || '';
-                    document.getElementById('outbound-numbers').value = settings.outbound?.numbers?.join(', ') || '';
-                    document.getElementById('outbound-template').value = settings.outbound?.messageTemplate || '';
+                    localSettings = data.data;
+                    document.getElementById('personality-central').value = localSettings.personality.centralPrompt || '';
+                    document.getElementById('tone-smiling').value = localSettings.personality.tones?.smiling || '';
+                    document.getElementById('tone-angry').value = localSettings.personality.tones?.angry || '';
+                    document.getElementById('tone-sad').value = localSettings.personality.tones?.sad || '';
+                    document.getElementById('tone-formal').value = localSettings.personality.tones?.formal || '';
+                    document.getElementById('policy-text').value = localSettings.privacyPolicy || '';
+                    document.getElementById('outbound-numbers').value = localSettings.outbound?.numbers?.join(', ') || '';
+                    document.getElementById('outbound-template').value = localSettings.outbound?.messageTemplate || '';
+
+                    document.getElementById('admin-phone-input').value = localSettings.adminPhoneNumber || '';
+                    document.getElementById('dictionary-text').value = localSettings.personality.dictionary?.join(', ') || '';
+
+                    renderCountryPersonalities(localSettings.personality.countryPersonalities || []);
+                    renderRulesList(localSettings.rules || []);
+
+                    // Load database routing settings if they exist
+                    if (localSettings.databaseRouting) {
+                        document.getElementById('routing-users').value = localSettings.databaseRouting.users || '';
+                        document.getElementById('routing-chatlogs').value = localSettings.databaseRouting.chatLogs || '';
+                    }
                 }
             } catch (err) {
                 console.error('Settings load failed:', err);
             }
         }
 
-        // Save Personality Configuration
+        function renderCountryPersonalities(list) {
+            const tbody = document.getElementById('country-personalities-table-body');
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No hay personalidades por país configuradas.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = list.map((item, index) => {
+                return `
+                <tr>
+                    <td><strong>${item.country}</strong></td>
+                    <td><small class="text-muted">${item.prompt}</small></td>
+                    <td><button class="btn btn-sm btn-outline-danger" onclick="deleteCountryPersonality(${index})">Eliminar</button></td>
+                </tr>
+                `;
+            }).join('');
+        }
+
+        document.getElementById('country-personality-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const country = document.getElementById('cp-country').value.trim();
+            const prompt = document.getElementById('cp-prompt').value.trim();
+
+            const updatedList = [...(localSettings.personality.countryPersonalities || [])];
+            // Remove existing if any
+            const existingIdx = updatedList.findIndex(cp => cp.country.toLowerCase() === country.toLowerCase());
+            if (existingIdx !== -1) updatedList.splice(existingIdx, 1);
+
+            updatedList.push({ country, prompt });
+
+            const payload = {
+                personality: {
+                    ...localSettings.personality,
+                    countryPersonalities: updatedList
+                }
+            };
+
+            await saveSettings(payload, 'Personalidad para el país guardada');
+            document.getElementById('country-personality-form').reset();
+        });
+
+        async function deleteCountryPersonality(index) {
+            if (!confirm('¿Deseas eliminar esta personalidad por país?')) return;
+            const updatedList = [...(localSettings.personality.countryPersonalities || [])];
+            updatedList.splice(index, 1);
+
+            const payload = {
+                personality: {
+                    ...localSettings.personality,
+                    countryPersonalities: updatedList
+                }
+            };
+            await saveSettings(payload, 'Personalidad eliminada');
+        }
+
+        // Dictionary Save Form
+        document.getElementById('dictionary-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const words = document.getElementById('dictionary-text').value
+                .split(',')
+                .map(w => w.trim())
+                .filter(w => w !== '');
+
+            const payload = {
+                personality: {
+                    ...localSettings.personality,
+                    dictionary: words
+                }
+            };
+            await saveSettings(payload, 'Diccionario actualizado correctamente');
+        });
+
+        // Rules & Laws Variants Management
+        function renderRulesList(list) {
+            const tbody = document.getElementById('rules-table-body');
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No hay reglas o variantes de ley configuradas.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = list.map((rule, idx) => {
+                return rule.variants.map((v, vIdx) => {
+                    return `
+                    <tr>
+                        <td><strong>${rule.fieldName}</strong></td>
+                        <td><span class="badge bg-dark">${v.name}</span></td>
+                        <td><small>${v.text}</small></td>
+                        <td><button class="btn btn-sm btn-outline-danger" onclick="deleteRule(${idx}, ${vIdx})">Eliminar</button></td>
+                    </tr>
+                    `;
+                }).join('');
+            }).join('');
+        }
+
+        document.getElementById('rules-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const field = document.getElementById('rule-field').value.trim().toLowerCase();
+            const variantName = document.getElementById('rule-variant-name').value.trim();
+            const ruleText = document.getElementById('rule-text').value.trim();
+
+            const updatedRules = [...(localSettings.rules || [])];
+            let existingFieldRule = updatedRules.find(r => r.fieldName === field);
+
+            if (!existingFieldRule) {
+                existingFieldRule = { fieldName: field, variants: [] };
+                updatedRules.push(existingFieldRule);
+            }
+
+            // Remove if variant name already exists
+            existingFieldRule.variants = existingFieldRule.variants.filter(v => v.name.toLowerCase() !== variantName.toLowerCase());
+            existingFieldRule.variants.push({ name: variantName, text: ruleText });
+
+            const payload = {
+                rules: updatedRules
+            };
+
+            await saveSettings(payload, 'Regla agregada correctamente');
+            document.getElementById('rule-variant-name').value = '';
+            document.getElementById('rule-text').value = '';
+        });
+
+        async function deleteRule(ruleIdx, variantIdx) {
+            if (!confirm('¿Deseas eliminar esta regla?')) return;
+            const updatedRules = JSON.parse(JSON.stringify(localSettings.rules || []));
+
+            updatedRules[ruleIdx].variants.splice(variantIdx, 1);
+            if (updatedRules[ruleIdx].variants.length === 0) {
+                updatedRules.splice(ruleIdx, 1);
+            }
+
+            const payload = { rules: updatedRules };
+            await saveSettings(payload, 'Regla eliminada correctamente');
+        }
+
+        // Save General Personality form
         document.getElementById('personality-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const payload = {
                 personality: {
+                    ...localSettings.personality,
                     centralPrompt: document.getElementById('personality-central').value,
                     tones: {
                         smiling: document.getElementById('tone-smiling').value,
@@ -843,9 +1596,12 @@
         loadGrokConfig();
         loadMcpTools();
         loadSettings();
+        fetchSessions();
+        searchUsers();
 
         setInterval(fetchStats, 5000); // Poll general stats every 5s
         setInterval(fetchMongoStats, 10000); // Poll MongoDB Atlas stats every 10s
+        setInterval(fetchSessions, 10000); // Poll sessions list every 10s
     </script>
 </body>
 </html>
