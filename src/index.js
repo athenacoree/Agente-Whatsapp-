@@ -1014,33 +1014,54 @@ async function startServer() {
         const hasWaha = startWaha();
         if (hasWaha) {
             await waitForWaha('http://localhost:3012');
-        }
-
-        // Create and initialize bot
-        console.log('🤖 Initializing WA Bot...');
-        bot = new WABot(config);
-
-        // Check WAHA connection
-        if (config.simulationMode) {
-            console.log('🔧 Running in SIMULATION MODE - WAHA connection not required');
-            console.log('💭 Bot will simulate message handling for testing');
-        } else {
-            const initialized = await bot.initialize();
-            if (!initialized) {
-                console.error('⚠️  WAHA connection failed, but bot will continue in limited mode');
-                console.log('📱 To use full functionality, ensure WAHA is running on:', config.wahaApiUrl);
-                console.log('🔧 Or set SIMULATION_MODE=true in .env for testing');
-            } else {
-                console.log('✅ WAHA service initialized successfully');
+            if (config.wahaApiUrl === 'http://localhost:3010') {
+                config.wahaApiUrl = 'http://localhost:3012';
+                console.log(`🔄 Local WAHA detected. Pointing bot direct connection to ${config.wahaApiUrl}`);
             }
         }
 
-        // Start Express server on fixed port
-        app.listen(PORT, '0.0.0.0', () => {
+        // Create bot instance first (so it is defined and won't throw TypeError for incoming requests)
+        console.log('🤖 Creating WA Bot instance...');
+        bot = new WABot(config);
+
+        // Start Express server on fixed port FIRST
+        app.listen(PORT, '0.0.0.0', async () => {
             console.log(`🌐 Express server running on port ${PORT}`);
             console.log(`📊 Health check: http://localhost:${PORT}/health`);
             console.log(`🤖 Bot status: http://localhost:${PORT}/bot/status`);
             console.log(`🔗 Webhook URL: http://192.168.18.182:${PORT}/webhook`);
+
+            // Check WAHA connection
+            if (config.simulationMode) {
+                console.log('🔧 Running in SIMULATION MODE - WAHA connection not required');
+                console.log('💭 Bot will simulate message handling for testing');
+            } else {
+                const initialized = await bot.initialize();
+                if (!initialized) {
+                    console.error('⚠️  WAHA connection failed, but bot will continue in limited mode');
+                    console.log('📱 To use full functionality, ensure WAHA is running on:', config.wahaApiUrl);
+                    console.log('🔧 Or set SIMULATION_MODE=true in .env for testing');
+                } else {
+                    console.log('✅ WAHA service initialized successfully');
+                }
+            }
+
+            // Start message polling (DISABLED - WAHA requires chatId for each request)
+            console.log('📡 Bot ready to receive messages via webhook');
+            console.log('🔗 Webhook URL: http://localhost:' + PORT + '/webhook');
+            console.log('💡 Configure WAHA to send webhooks to this URL for real-time message processing');
+            console.log('🧪 Use test endpoint: http://localhost:' + PORT + '/bot/test-message for testing');
+
+            // Cleanup old conversations every hour
+            setInterval(() => {
+                bot.cleanup();
+                console.log('🧹 Cleaned up old conversation history');
+            }, 60 * 60 * 1000);
+
+            console.log('✅ Bot started successfully!');
+            console.log(`📝 Command key: "${config.botCommandKey}"`);
+            console.log(`🤖 Bot name: "${config.botName}"`);
+            console.log('💬 The bot will respond to messages starting with the command key in both private and group chats.');
         }).on('error', (err) => {
             console.error('❌ Failed to start server:', err);
             if (err.code === 'EADDRINUSE') {
@@ -1048,28 +1069,6 @@ async function startServer() {
             }
             process.exit(1);
         });
-
-        // Start message polling (DISABLED - WAHA requires chatId for each request)
-        console.log('📡 Bot ready to receive messages via webhook');
-        console.log('🔗 Webhook URL: http://localhost:' + PORT + '/webhook');
-        console.log('💡 Configure WAHA to send webhooks to this URL for real-time message processing');
-        console.log('🧪 Use test endpoint: http://localhost:' + PORT + '/bot/test-message for testing');
-
-        // For now, disable polling as WAHA API requires specific chatId
-        // if (!config.simulationMode) {
-        //     bot.startPolling(3000);
-        // }
-
-        // Cleanup old conversations every hour
-        setInterval(() => {
-            bot.cleanup();
-            console.log('🧹 Cleaned up old conversation history');
-        }, 60 * 60 * 1000);
-
-        console.log('✅ Bot started successfully!');
-        console.log(`📝 Command key: "${config.botCommandKey}"`);
-        console.log(`🤖 Bot name: "${config.botName}"`);
-        console.log('💬 The bot will respond to messages starting with the command key in both private and group chats.');
 
     } catch (error) {
         console.error('❌ Failed to start server:', error);
