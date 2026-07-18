@@ -6,12 +6,18 @@ class DocumentService {
 
     async initialize() {
         try {
+            if (!this.db || !this.db.initialized || !this.db.db) {
+                console.warn('⚠️ MongoDB DatabaseService is not initialized or connected. Document Service running in degraded/disabled mode.');
+                this.initialized = false;
+                return false;
+            }
             await this.createDocumentTables();
             this.initialized = true;
             console.log('✅ Document Service initialized successfully with MongoDB');
             return true;
         } catch (error) {
             console.error('❌ Document Service initialization failed:', error);
+            this.initialized = false;
             return false;
         }
     }

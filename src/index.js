@@ -265,6 +265,125 @@ app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
 });
 
+// Link WhatsApp via Pairing Code for mobile-friendly flow
+app.get('/link-whatsapp', async (req, res) => {
+    try {
+        let phone = req.query.phone;
+        const session = req.query.session || config.wahaSessionName || 'default';
+
+        if (!phone) {
+            return res.send(`
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <title>Vincular WhatsApp - Bot</title>
+                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                </head>
+                <body class="bg-light d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+                    <div class="card shadow border-0 p-4 m-3" style="max-width: 500px; width: 100%;">
+                        <h2 class="text-center text-success mb-4">Vincular WhatsApp</h2>
+                        <form method="GET" action="/link-whatsapp">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Número de Teléfono</label>
+                                <input type="text" class="form-control form-control-lg" name="phone" placeholder="ej. 34611223344" required>
+                                <div class="form-text">Ingresa tu número de teléfono con código de país completo, sin símbolos (+ o -).</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Nombre de la Sesión (Opcional)</label>
+                                <input type="text" class="form-control" name="session" value="${session}">
+                            </div>
+                            <button type="submit" class="btn btn-success btn-lg w-100">Generar Código de Vinculación</button>
+                        </form>
+                    </div>
+                </body>
+                </html>
+            `);
+        }
+
+        // Clean phone number
+        phone = phone.replace(/[+\-\s()]/g, '');
+
+        if (!bot || !bot.wahaService) {
+            return res.status(503).send('<h1>Error: El bot o el servicio WAHA aún no están listos</h1>');
+        }
+
+        let result;
+        if (config.simulationMode) {
+            console.log(`[SIMULATION] Mocking request-code for ${phone}`);
+            result = { code: 'SIMULATED-CODE' };
+        } else {
+            // First ensure the session is running
+            try {
+                await bot.wahaService.startSession(session);
+                // Give it 3 seconds to spin up if it was stopped
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            } catch (err) {
+                console.log('Session start attempt info:', err.message);
+            }
+            result = await bot.wahaService.requestCode(session, phone);
+        }
+
+        const pairingCode = result.code || result.pairingCode || result.result?.code || JSON.stringify(result);
+
+        res.send(`
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Código de Vinculación - Bot</title>
+                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+            </head>
+            <body class="bg-light d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+                <div class="card shadow border-0 p-4 m-3" style="max-width: 500px; width: 100%;">
+                    <h2 class="text-center text-success mb-3">Tu Código de Vinculación</h2>
+                    <p class="text-center text-muted mb-4">Ingresa este código en tu aplicación de WhatsApp móvil para conectar el bot.</p>
+
+                    <div class="text-center bg-dark text-warning p-4 rounded mb-4">
+                        <span class="display-4 fw-bold font-monospace text-wrap" style="letter-spacing: 2px;">${pairingCode}</span>
+                    </div>
+
+                    <h4 class="mb-3">Pasos a seguir en tu celular:</h4>
+                    <ol class="list-group list-group-numbered mb-4 border-0">
+                        <li class="list-group-item border-0 bg-transparent ps-0">Abre la app de <strong>WhatsApp</strong> en tu teléfono.</li>
+                        <li class="list-group-item border-0 bg-transparent ps-0">Ve a <strong>Ajustes / Configuración</strong> (tres puntos en Android o pestaña de Configuración en iPhone).</li>
+                        <li class="list-group-item border-0 bg-transparent ps-0">Selecciona <strong>Dispositivos vinculados</strong>.</li>
+                        <li class="list-group-item border-0 bg-transparent ps-0">Presiona <strong>Vincular un dispositivo</strong>.</li>
+                        <li class="list-group-item border-0 bg-transparent ps-0">Selecciona la opción <strong>Vincular con el número de teléfono</strong> (abajo en la pantalla).</li>
+                        <li class="list-group-item border-0 bg-transparent ps-0">Introduce el código de arriba: <strong>${pairingCode}</strong>.</li>
+                    </ol>
+
+                    <div class="alert alert-info text-center py-2 mb-0">
+                        Una vez ingresado, el bot se conectará automáticamente. ¡Puedes cerrar esta pestaña!
+                    </div>
+                </div>
+            </body>
+            </html>
+        `);
+
+        // Save requested number as backup primary session & phone
+        const settings = settingsService.getSettings();
+        const updatedSettings = {
+            ...settings,
+            primarySessionName: session,
+            primaryPhoneNumber: phone
+        };
+        settingsService.saveSettings(updatedSettings);
+
+    } catch (error) {
+        res.status(500).send(`
+            <html>
+            <head><meta charset="utf-8"><title>Error</title></head>
+            <body class="p-4">
+                <h1 class="text-danger">Error al generar código</h1>
+                <p>${error.message}</p>
+                <a href="/link-whatsapp" class="btn btn-secondary">Volver a intentar</a>
+            </body>
+            </html>
+        `);
+    }
+});
+
 // MongoDB Atlas Admin Endpoints
 app.post('/api/mongo/config', express.json(), async (req, res) => {
     try {

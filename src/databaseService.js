@@ -28,7 +28,8 @@ class DatabaseService {
 
             this.client = new MongoClient(uri, {
                 connectTimeoutMS: 5000,
-                socketTimeoutMS: 5000
+                socketTimeoutMS: 5000,
+                tls: true
             });
             await this.client.connect();
             this.db = this.client.db(dbName);
