@@ -24,6 +24,8 @@ class SettingsService {
                 messageTemplate: "Hola, soy tu asistente virtual de IA. ¡Me encantaría ayudarte a comenzar! ¿Deseas registrarte con nosotros hoy?"
             },
             adminPhoneNumber: "",
+            primarySessionName: "default",
+            primaryPhoneNumber: "",
             userAccess: {}, // { [chatId]: "normal" | "banned" | "special" }
             databases: [], // [{ id, name, uri, database, category, limitMb }]
             databaseRouting: {
@@ -57,6 +59,8 @@ class SettingsService {
                 if (!this.settings.personality.rules) this.settings.personality.rules = [];
                 if (!this.settings.rules) this.settings.rules = [];
                 if (!this.settings.adminPhoneNumber) this.settings.adminPhoneNumber = "";
+                if (!this.settings.primarySessionName) this.settings.primarySessionName = "default";
+                if (!this.settings.primaryPhoneNumber) this.settings.primaryPhoneNumber = "";
                 if (!this.settings.userAccess) this.settings.userAccess = {};
                 if (!this.settings.databases) this.settings.databases = [];
                 if (!this.settings.databaseRouting) {

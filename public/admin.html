@@ -244,6 +244,34 @@
                             <div class="text-muted py-4">Selecciona una sesión de la tabla o inicia una nueva sesión para escanear el QR.</div>
                         </div>
                     </div>
+
+                    <!-- Link via SMS/Pairing Code -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0"><i class="bi bi-chat-left-text"></i> Vincular mediante Código SMS</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="sms-pairing-form">
+                                <div class="mb-3">
+                                    <label class="form-label font-weight-bold">Nombre de la Sesión</label>
+                                    <input type="text" class="form-control" id="sms-session-name" placeholder="ej. default" value="default" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label font-weight-bold">Número de Teléfono</label>
+                                    <input type="text" class="form-control" id="sms-phone-number" placeholder="ej. 54911223344" required>
+                                    <div class="form-text">Formato internacional completo sin símbolos (ej. con código de país).</div>
+                                </div>
+                                <button type="button" class="btn btn-outline-primary w-100 mb-3" onclick="requestSmsCode()">1. Solicitar Código SMS</button>
+
+                                <div class="mb-3">
+                                    <label class="form-label font-weight-bold">Código de Confirmación Recibido</label>
+                                    <input type="text" class="form-control" id="sms-verification-code" placeholder="Ingresa el código">
+                                </div>
+                                <button type="button" class="btn btn-success w-100" onclick="authorizeSmsCode()">2. Verificar y Vincular</button>
+                            </form>
+                            <div id="sms-status-feedback" class="mt-3 text-center small text-muted"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="col-md-7">
@@ -1203,6 +1231,73 @@
                 }
             } catch (err) {
                 console.error('Stop session failed:', err);
+            }
+        }
+
+        async function requestSmsCode() {
+            const sessionName = document.getElementById('sms-session-name').value.trim();
+            const phoneNumber = document.getElementById('sms-phone-number').value.trim();
+            const feedback = document.getElementById('sms-status-feedback');
+
+            if (!sessionName || !phoneNumber) {
+                alert('Por favor completa el nombre de sesión y el número de teléfono.');
+                return;
+            }
+
+            feedback.innerHTML = '<div class="spinner-border spinner-border-sm text-primary me-2"></div>Solicitando código de vinculación...';
+            feedback.className = 'mt-3 text-center small text-muted';
+
+            try {
+                const res = await fetch('/api/whatsapp/request-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionName, phoneNumber })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    feedback.innerHTML = '¡Código solicitado con éxito! WhatsApp enviará un código SMS a tu teléfono o deberás ingresarlo si ya te muestra un código de emparejamiento. Revisa tu aplicación de WhatsApp o tu SMS.';
+                    feedback.className = 'mt-3 text-center small text-success';
+                } else {
+                    feedback.innerHTML = 'Error: ' + (data.error || 'No se pudo solicitar el código');
+                    feedback.className = 'mt-3 text-center small text-danger';
+                }
+            } catch (err) {
+                feedback.innerHTML = 'Error de conexión: ' + err.message;
+                feedback.className = 'mt-3 text-center small text-danger';
+            }
+        }
+
+        async function authorizeSmsCode() {
+            const sessionName = document.getElementById('sms-session-name').value.trim();
+            const code = document.getElementById('sms-verification-code').value.trim();
+            const feedback = document.getElementById('sms-status-feedback');
+
+            if (!sessionName || !code) {
+                alert('Por favor completa el nombre de sesión y el código de confirmación.');
+                return;
+            }
+
+            feedback.innerHTML = '<div class="spinner-border spinner-border-sm text-primary me-2"></div>Verificando código...';
+            feedback.className = 'mt-3 text-center small text-muted';
+
+            try {
+                const res = await fetch('/api/whatsapp/authorize-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionName, code })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    feedback.innerHTML = '¡Número vinculado con éxito! La sesión ahora está conectada.';
+                    feedback.className = 'mt-3 text-center small text-success';
+                    fetchSessions();
+                } else {
+                    feedback.innerHTML = 'Error de verificación: ' + (data.error || 'Código incorrecto o expirado');
+                    feedback.className = 'mt-3 text-center small text-danger';
+                }
+            } catch (err) {
+                feedback.innerHTML = 'Error de conexión: ' + err.message;
+                feedback.className = 'mt-3 text-center small text-danger';
             }
         }
 

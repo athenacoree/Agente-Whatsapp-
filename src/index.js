@@ -102,6 +102,85 @@ app.post('/api/mongo/config', express.json(), async (req, res) => {
     }
 });
 
+app.post('/api/whatsapp/request-code', express.json(), async (req, res) => {
+    try {
+        const { sessionName, phoneNumber } = req.body;
+        if (!sessionName || !phoneNumber) {
+            return res.status(400).json({ error: 'sessionName and phoneNumber are required' });
+        }
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+
+        let result;
+        if (config.simulationMode) {
+            console.log(`[SIMULATION] Mocking request-code for ${phoneNumber}`);
+            result = { success: true, status: 'PENDING_CONFIRMATION', phoneNumber };
+        } else {
+            result = await bot.wahaService.requestCode(sessionName, phoneNumber);
+        }
+
+        // Save requested number as backup primary session & phone
+        const settings = settingsService.getSettings();
+        const updatedSettings = {
+            ...settings,
+            primarySessionName: sessionName,
+            primaryPhoneNumber: phoneNumber
+        };
+        settingsService.saveSettings(updatedSettings);
+
+        res.json({ success: true, result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/whatsapp/authorize-code', express.json(), async (req, res) => {
+    try {
+        const { sessionName, code } = req.body;
+        if (!sessionName || !code) {
+            return res.status(400).json({ error: 'sessionName and code are required' });
+        }
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+
+        let result;
+        let phoneNumber = "";
+
+        if (config.simulationMode) {
+            console.log(`[SIMULATION] Mocking authorize-code: ${code}`);
+            result = { success: true, status: 'CONNECTED' };
+            phoneNumber = "123456789";
+        } else {
+            result = await bot.wahaService.authorizeCode(sessionName, code);
+            try {
+                // Wait 2 seconds for session to fully transition to connected
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                const me = await bot.wahaService.getMe(sessionName);
+                if (me && me.id) {
+                    phoneNumber = me.id.split('@')[0];
+                }
+            } catch (meError) {
+                console.error('Could not fetch connected number details immediately:', meError.message);
+            }
+        }
+
+        // Save to settings
+        const settings = settingsService.getSettings();
+        const updatedSettings = {
+            ...settings,
+            primarySessionName: sessionName,
+            primaryPhoneNumber: phoneNumber || settings.primaryPhoneNumber || ""
+        };
+        settingsService.saveSettings(updatedSettings);
+
+        res.json({ success: true, result, phoneNumber });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Users and Access Control Endpoints
 app.get('/api/admin/users', async (req, res) => {
     try {

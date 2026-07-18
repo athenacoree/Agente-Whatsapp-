@@ -5,6 +5,7 @@ class WAHAService {
         this.apiUrl = apiUrl;
         this.sessionName = sessionName;
         this.apiKey = apiKey;
+        this.client = this.createAuthClient('bearer');
     }
 
     createAuthClient(authMethod = 'bearer') {
@@ -236,6 +237,43 @@ class WAHAService {
             console.error(`Error adding contact ${firstName} ${lastName} (${phone}):`, error.message);
             // Fallback: simulate contact adding by returning success
             return { success: true, simulated: true, message: 'Contacto sincronizado en memoria' };
+        }
+    }
+
+    async requestCode(sessionName, phoneNumber, method = 'SMS') {
+        try {
+            const url = `/api/${sessionName}/auth/request-code`;
+            const response = await this.client.post(url, {
+                phoneNumber: phoneNumber,
+                method: method
+            });
+            return response.data;
+        } catch (error) {
+            console.error(`Error requesting pairing code for ${phoneNumber} in session ${sessionName}:`, error.message);
+            throw error;
+        }
+    }
+
+    async authorizeCode(sessionName, code) {
+        try {
+            const url = `/api/${sessionName}/auth/authorize-code`;
+            const response = await this.client.post(url, {
+                code: code
+            });
+            return response.data;
+        } catch (error) {
+            console.error(`Error authorizing pairing code in session ${sessionName}:`, error.message);
+            throw error;
+        }
+    }
+
+    async getMe(sessionName) {
+        try {
+            const response = await this.client.get(`/api/sessions/${sessionName}/me`);
+            return response.data;
+        } catch (error) {
+            console.error(`Error fetching me info for session ${sessionName}:`, error.message);
+            throw error;
         }
     }
 }
