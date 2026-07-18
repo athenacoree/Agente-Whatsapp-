@@ -150,6 +150,17 @@ function startWaha() {
             WEBHOOK_EVENTS: 'message,ack,message.any'
         };
 
+        // Temporary authentication disablement for testing phase
+        if (process.env.DISABLE_AUTH === 'true') {
+            console.log('🔓 DISABLE_AUTH=true detected. Disabling WAHA API Key, Dashboard, and Swagger authentication.');
+            wahaEnv.WAHA_API_KEY = '';
+            wahaEnv.WAHA_NO_API_KEY = 'True';
+            wahaEnv.WAHA_DASHBOARD_PASSWORD = '';
+            wahaEnv.WAHA_DASHBOARD_NO_PASSWORD = 'True';
+            wahaEnv.WHATSAPP_SWAGGER_PASSWORD = '';
+            wahaEnv.WHATSAPP_SWAGGER_NO_PASSWORD = 'True';
+        }
+
         // Dynamically compute the cwd to be the base container directory /app
         const spawnCwd = wahaPath.startsWith('/app') ? '/app' : path.dirname(path.dirname(wahaPath));
 
@@ -1062,6 +1073,16 @@ async function startServer() {
             console.log(`📝 Command key: "${config.botCommandKey}"`);
             console.log(`🤖 Bot name: "${config.botName}"`);
             console.log('💬 The bot will respond to messages starting with the command key in both private and group chats.');
+
+            // Print test access links block
+            const baseHost = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+            console.log('\n========================================');
+            console.log('📋 ENLACES DE ACCESO PARA PRUEBAS:');
+            console.log(`🖥️  Dashboard WAHA: ${baseHost}/dashboard`);
+            console.log(`📘 Swagger/API Docs: ${baseHost}/swagger`);
+            console.log(`❤️  Health check: ${baseHost}/health`);
+            console.log(`🤖 Bot status: ${baseHost}/bot/status`);
+            console.log('========================================\n');
         }).on('error', (err) => {
             console.error('❌ Failed to start server:', err);
             if (err.code === 'EADDRINUSE') {
