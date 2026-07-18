@@ -1,5 +1,3 @@
-const { Pool } = require('pg');
-
 class DocumentService {
     constructor(databaseService) {
         this.db = databaseService;
@@ -10,7 +8,7 @@ class DocumentService {
         try {
             await this.createDocumentTables();
             this.initialized = true;
-            console.log('✅ Document Service initialized successfully');
+            console.log('✅ Document Service initialized successfully with MongoDB');
             return true;
         } catch (error) {
             console.error('❌ Document Service initialization failed:', error);
@@ -19,45 +17,20 @@ class DocumentService {
     }
 
     async createDocumentTables() {
-        const createTablesQuery = `
-            -- Document data table
-            CREATE TABLE IF NOT EXISTS documents (
-                id SERIAL PRIMARY KEY,
-                pt_name VARCHAR(255) NOT NULL,
-                document_type VARCHAR(100) NOT NULL,
-                document_name VARCHAR(255) NOT NULL,
-                file_path TEXT,
-                description TEXT,
-                status VARCHAR(50) DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by VARCHAR(255),
-                tags TEXT[]
-            );
-
-            -- Document access logs
-            CREATE TABLE IF NOT EXISTS document_access_logs (
-                id SERIAL PRIMARY KEY,
-                pt_name VARCHAR(255) NOT NULL,
-                accessed_by VARCHAR(255) NOT NULL,
-                access_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                search_term VARCHAR(255)
-            );
-
-            -- Create indexes for performance
-            CREATE INDEX IF NOT EXISTS idx_documents_pt_name ON documents(pt_name);
-            CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type);
-            CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);
-            CREATE INDEX IF NOT EXISTS idx_documents_tags ON documents USING GIN(tags);
-            CREATE INDEX IF NOT EXISTS idx_document_logs_pt_name ON document_access_logs(pt_name);
-            CREATE INDEX IF NOT EXISTS idx_document_logs_time ON document_access_logs(access_time);
-        `;
-
         try {
-            await this.db.pool.query(createTablesQuery);
-            console.log('✅ Document tables created successfully');
+            const documents = this.db.db.collection('documents');
+            await documents.createIndex({ pt_name: 1 });
+            await documents.createIndex({ document_type: 1 });
+            await documents.createIndex({ status: 1 });
+            await documents.createIndex({ tags: 1 });
+
+            const accessLogs = this.db.db.collection('document_access_logs');
+            await accessLogs.createIndex({ pt_name: 1 });
+            await accessLogs.createIndex({ access_time: 1 });
+
+            console.log('✅ MongoDB document collections and indexes initialized successfully');
         } catch (error) {
-            console.error('❌ Error creating document tables:', error);
+            console.error('❌ Error creating document collections/indexes:', error);
             throw error;
         }
     }
@@ -65,28 +38,29 @@ class DocumentService {
     // Add document to database
     async addDocument(ptName, documentData) {
         if (!this.initialized) throw new Error('Document Service not initialized');
+        const collection = this.db.db.collection('documents');
 
-        const query = `
-            INSERT INTO documents (pt_name, document_type, document_name, file_path, description, created_by, tags)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *
-        `;
-
-        const values = [
-            ptName,
-            documentData.documentType,
-            documentData.documentName,
-            documentData.filePath || null,
-            documentData.description || null,
-            documentData.createdBy,
-            documentData.tags || []
-        ];
+        const doc = {
+            pt_name: ptName,
+            document_type: documentData.documentType,
+            document_name: documentData.documentName,
+            file_path: documentData.filePath || null,
+            description: documentData.description || null,
+            status: 'active',
+            created_at: new Date(),
+            updated_at: new Date(),
+            created_by: documentData.createdBy,
+            tags: documentData.tags || []
+        };
 
         try {
-            const result = await this.db.pool.query(query, values);
-            return result.rows[0];
+            const result = await collection.insertOne(doc);
+            return {
+                id: result.insertedId.toString(),
+                ...doc
+            };
         } catch (error) {
-            console.error('Error adding document:', error);
+            console.error('Error adding document in MongoDB:', error);
             throw error;
         }
     }
@@ -98,17 +72,20 @@ class DocumentService {
         // Log the search
         await this.logDocumentAccess(ptName, 'search', ptName);
 
-        const query = `
-            SELECT * FROM documents
-            WHERE pt_name ILIKE $1
-            ORDER BY document_name ASC
-        `;
+        const collection = this.db.db.collection('documents');
+        const regex = new RegExp(ptName, 'i');
 
         try {
-            const result = await this.db.pool.query(query, [`%${ptName}%`]);
-            return result.rows;
+            const results = await collection.find({ pt_name: { $regex: regex } })
+                .sort({ document_name: 1 })
+                .toArray();
+
+            return results.map(row => ({
+                id: row._id.toString(),
+                ...row
+            }));
         } catch (error) {
-            console.error('Error searching documents:', error);
+            console.error('Error searching documents in MongoDB:', error);
             throw error;
         }
     }
@@ -116,20 +93,29 @@ class DocumentService {
     // Get all PT names available
     async getAllPTNames() {
         if (!this.initialized) throw new Error('Document Service not initialized');
-
-        const query = `
-            SELECT DISTINCT pt_name, COUNT(*) as document_count
-            FROM documents
-            WHERE status = 'active'
-            GROUP BY pt_name
-            ORDER BY pt_name ASC
-        `;
+        const collection = this.db.db.collection('documents');
 
         try {
-            const result = await this.db.pool.query(query);
-            return result.rows;
+            const results = await collection.aggregate([
+                { $match: { status: 'active' } },
+                {
+                    $group: {
+                        _id: '$pt_name',
+                        document_count: { $sum: 1 }
+                    }
+                },
+                { $sort: { _id: 1 } },
+                {
+                    $project: {
+                        _id: 0,
+                        pt_name: '$_id',
+                        document_count: 1
+                    }
+                }
+            ]).toArray();
+            return results;
         } catch (error) {
-            console.error('Error getting PT names:', error);
+            console.error('Error getting PT names in MongoDB:', error);
             throw error;
         }
     }
@@ -137,40 +123,63 @@ class DocumentService {
     // Get documents statistics
     async getDocumentStats() {
         if (!this.initialized) throw new Error('Document Service not initialized');
+        const docsCollection = this.db.db.collection('documents');
+        const logsCollection = this.db.db.collection('document_access_logs');
 
-        const queries = {
-            totalDocuments: 'SELECT COUNT(*) as count FROM documents WHERE status = \'active\'',
-            totalPT: 'SELECT COUNT(DISTINCT pt_name) as count FROM documents WHERE status = \'active\'',
-            recentSearches: `
-                SELECT pt_name, COUNT(*) as search_count
-                FROM document_access_logs
-                WHERE access_time >= CURRENT_DATE - INTERVAL '7 days'
-                GROUP BY pt_name
-                ORDER BY search_count DESC
-                LIMIT 5
-            `,
-            documentTypes: `
-                SELECT document_type, COUNT(*) as count
-                FROM documents
-                WHERE status = 'active'
-                GROUP BY document_type
-                ORDER BY count DESC
-            `
-        };
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
         try {
-            const stats = {};
-            for (const [key, query] of Object.entries(queries)) {
-                const result = await this.db.pool.query(query);
-                if (key === 'recentSearches' || key === 'documentTypes') {
-                    stats[key] = result.rows;
-                } else {
-                    stats[key] = result.rows[0].count;
+            const totalDocuments = await docsCollection.countDocuments({ status: 'active' });
+
+            const distinctPTs = await docsCollection.distinct('pt_name', { status: 'active' });
+            const totalPT = distinctPTs.length;
+
+            const recentSearches = await logsCollection.aggregate([
+                { $match: { access_time: { $gte: sevenDaysAgo } } },
+                {
+                    $group: {
+                        _id: '$pt_name',
+                        search_count: { $sum: 1 }
+                    }
+                },
+                { $sort: { search_count: -1 } },
+                { $limit: 5 },
+                {
+                    $project: {
+                        _id: 0,
+                        pt_name: '$_id',
+                        search_count: 1
+                    }
                 }
-            }
-            return stats;
+            ]).toArray();
+
+            const documentTypes = await docsCollection.aggregate([
+                { $match: { status: 'active' } },
+                {
+                    $group: {
+                        _id: '$document_type',
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { count: -1 } },
+                {
+                    $project: {
+                        _id: 0,
+                        document_type: '$_id',
+                        count: 1
+                    }
+                }
+            ]).toArray();
+
+            return {
+                totalDocuments,
+                totalPT,
+                recentSearches,
+                documentTypes
+            };
         } catch (error) {
-            console.error('Error getting document stats:', error);
+            console.error('Error getting document stats in MongoDB:', error);
             throw error;
         }
     }
@@ -178,18 +187,18 @@ class DocumentService {
     // Log document access
     async logDocumentAccess(ptName, action, accessedBy, searchTerm = null) {
         if (!this.initialized) return;
-
-        const query = `
-            INSERT INTO document_access_logs (pt_name, accessed_by, search_term)
-            VALUES ($1, $2, $3)
-        `;
-
-        const values = [ptName, accessedBy, searchTerm];
+        const collection = this.db.db.collection('document_access_logs');
 
         try {
-            await this.db.pool.query(query, values);
+            await collection.insertOne({
+                pt_name: ptName,
+                accessed_by: accessedBy,
+                action: action,
+                access_time: new Date(),
+                search_term: searchTerm
+            });
         } catch (error) {
-            console.error('Error logging document access:', error);
+            console.error('Error logging document access in MongoDB:', error);
         }
     }
 
@@ -211,10 +220,7 @@ class DocumentService {
 
     // Close database connection
     async close() {
-        if (this.db && this.db.pool) {
-            await this.db.pool.end();
-            console.log('✅ Document Service connection closed');
-        }
+        // Managed by DatabaseService
     }
 }
 

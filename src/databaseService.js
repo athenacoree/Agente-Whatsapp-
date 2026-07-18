@@ -1,99 +1,70 @@
-const { Pool } = require('pg');
-const fs = require('fs');
-const path = require('path');
+const { MongoClient } = require('mongodb');
 
 class DatabaseService {
     constructor(config) {
         this.config = config;
-        this.pool = null;
+        this.client = null;
+        this.db = null;
         this.initialized = false;
     }
 
     async initialize() {
         try {
-            // PostgreSQL connection
-            this.pool = new Pool({
-                host: process.env.DB_HOST || 'localhost',
-                port: process.env.DB_PORT || 5432,
-                database: process.env.DB_NAME || 'wa_bot',
-                user: process.env.DB_USER || 'postgres',
-                password: process.env.DB_PASSWORD || 'password',
-                max: 20,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 2000,
+            const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/wa_bot';
+
+            // Extract dbName from URI or default to 'wa_bot'
+            let dbName = 'wa_bot';
+            try {
+                const parsedUri = new URL(uri);
+                if (parsedUri.pathname && parsedUri.pathname !== '/') {
+                    dbName = parsedUri.pathname.substring(1).split('?')[0];
+                }
+            } catch (e) {
+                const match = uri.match(/\/([^/?]+)(\?|$)/);
+                if (match && match[1]) {
+                    dbName = match[1];
+                }
+            }
+
+            this.client = new MongoClient(uri, {
+                connectTimeoutMS: 5000,
+                socketTimeoutMS: 5000
             });
+            await this.client.connect();
+            this.db = this.client.db(dbName);
 
-            // Test connection
-            const client = await this.pool.connect();
-            await client.query('SELECT NOW()');
-            client.release();
+            console.log(`✅ MongoDB connected successfully to database: ${dbName}`);
 
-            console.log('✅ PostgreSQL connected successfully');
-
-            // Initialize tables
+            // Initialize collections and indexes
             await this.createTables();
 
             this.initialized = true;
-            console.log('✅ Database initialized successfully');
+            console.log('✅ Database initialized successfully with MongoDB');
             return true;
         } catch (error) {
-            console.error('❌ Database initialization failed:', error);
+            console.error('❌ Database initialization failed with MongoDB:', error);
             return false;
         }
     }
 
     async createTables() {
-        const createTablesQuery = `
-            -- User data table
-            CREATE TABLE IF NOT EXISTS user_data (
-                id SERIAL PRIMARY KEY,
-                chat_id VARCHAR(255) NOT NULL,
-                user_name VARCHAR(255),
-                phone_number VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                data_json JSONB,
-                tags TEXT[],
-                UNIQUE(chat_id)
-            );
-
-            -- Message logs table
-            CREATE TABLE IF NOT EXISTS message_logs (
-                id SERIAL PRIMARY KEY,
-                message_id VARCHAR(255) UNIQUE,
-                chat_id VARCHAR(255) NOT NULL,
-                sender_name VARCHAR(255),
-                message_content TEXT,
-                message_type VARCHAR(50) DEFAULT 'text',
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processed BOOLEAN DEFAULT FALSE,
-                response_content TEXT
-            );
-
-            -- Bot commands table
-            CREATE TABLE IF NOT EXISTS bot_commands (
-                id SERIAL PRIMARY KEY,
-                chat_id VARCHAR(255) NOT NULL,
-                command_type VARCHAR(100) NOT NULL,
-                command_data JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processed BOOLEAN DEFAULT FALSE
-            );
-
-            -- Create indexes for better performance
-            CREATE INDEX IF NOT EXISTS idx_user_data_chat_id ON user_data(chat_id);
-            CREATE INDEX IF NOT EXISTS idx_message_logs_chat_id ON message_logs(chat_id);
-            CREATE INDEX IF NOT EXISTS idx_message_logs_timestamp ON message_logs(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_bot_commands_chat_id ON bot_commands(chat_id);
-            CREATE INDEX IF NOT EXISTS idx_user_data_tags ON user_data USING GIN(tags);
-            CREATE INDEX IF NOT EXISTS idx_user_data_data_json ON user_data USING GIN(data_json);
-        `;
-
         try {
-            await this.pool.query(createTablesQuery);
-            console.log('✅ Database tables created successfully');
+            const userData = this.db.collection('user_data');
+            await userData.createIndex({ chat_id: 1 }, { unique: true });
+            await userData.createIndex({ tags: 1 });
+            await userData.createIndex({ updated_at: -1 });
+
+            const messageLogs = this.db.collection('message_logs');
+            await messageLogs.createIndex({ message_id: 1 }, { unique: true });
+            await messageLogs.createIndex({ chat_id: 1 });
+            await messageLogs.createIndex({ timestamp: 1 });
+
+            const botCommands = this.db.collection('bot_commands');
+            await botCommands.createIndex({ chat_id: 1 });
+
+            console.log('✅ MongoDB collections and indexes initialized successfully');
         } catch (error) {
-            console.error('❌ Error creating tables:', error);
+            console.error('❌ Error creating indexes in MongoDB:', error);
             throw error;
         }
     }
@@ -124,102 +95,104 @@ class DatabaseService {
         const finalName = userData.userName || existingName;
         const finalPhone = userData.phoneNumber || existingPhone;
 
-        const query = `
-            INSERT INTO user_data (chat_id, user_name, phone_number, data_json, tags)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (chat_id)
-            DO UPDATE SET
-                user_name = EXCLUDED.user_name,
-                phone_number = EXCLUDED.phone_number,
-                data_json = EXCLUDED.data_json,
-                tags = EXCLUDED.tags,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-        `;
-
-        const values = [
-            chatId,
-            finalName,
-            finalPhone,
-            JSON.stringify(mergedData),
-            mergedTags
-        ];
-
+        const collection = this.db.collection('user_data');
         try {
-            const result = await this.pool.query(query, values);
-            return result.rows[0];
+            await collection.updateOne(
+                { chat_id: chatId },
+                {
+                    $set: {
+                        user_name: finalName,
+                        phone_number: finalPhone,
+                        data_json: mergedData,
+                        tags: mergedTags,
+                        updated_at: new Date()
+                    },
+                    $setOnInsert: {
+                        created_at: new Date()
+                    }
+                },
+                { upsert: true }
+            );
+            return await this.getUserData(chatId);
         } catch (error) {
-            console.error('Error upserting user data:', error);
+            console.error('Error upserting user data in MongoDB:', error);
             throw error;
         }
     }
 
     async getUserData(chatId) {
         if (!this.initialized) throw new Error('Database not initialized');
-
-        const query = 'SELECT * FROM user_data WHERE chat_id = $1';
-
+        const collection = this.db.collection('user_data');
         try {
-            const result = await this.pool.query(query, [chatId]);
-            return result.rows[0] || null;
+            const user = await collection.findOne({ chat_id: chatId });
+            if (user) {
+                // Ensure field naming is fully compatible
+                user.chatId = user.chat_id;
+                user.phoneNumber = user.phone_number;
+            }
+            return user;
         } catch (error) {
-            console.error('Error getting user data:', error);
+            console.error('Error getting user data in MongoDB:', error);
             throw error;
         }
     }
 
     async getAllUserData(limit = 50, offset = 0) {
         if (!this.initialized) throw new Error('Database not initialized');
-
-        const query = `
-            SELECT chat_id, user_name, phone_number, created_at, updated_at, tags
-            FROM user_data
-            ORDER BY updated_at DESC
-            LIMIT $1 OFFSET $2
-        `;
-
+        const collection = this.db.collection('user_data');
         try {
-            const result = await this.pool.query(query, [limit, offset]);
-            return result.rows;
+            const users = await collection.find({})
+                .sort({ updated_at: -1 })
+                .skip(offset)
+                .limit(limit)
+                .toArray();
+
+            return users.map(user => {
+                user.chatId = user.chat_id;
+                user.phoneNumber = user.phone_number;
+                return user;
+            });
         } catch (error) {
-            console.error('Error getting all user data:', error);
+            console.error('Error getting all user data in MongoDB:', error);
             throw error;
         }
     }
 
     async searchUserData(searchTerm, searchField = 'all') {
         if (!this.initialized) throw new Error('Database not initialized');
-
-        let query;
-        let values = [];
+        const collection = this.db.collection('user_data');
+        let query = {};
+        const regex = new RegExp(searchTerm, 'i');
 
         switch (searchField) {
             case 'name':
-                query = `SELECT * FROM user_data WHERE user_name ILIKE $1 ORDER BY updated_at DESC`;
-                values = [`%${searchTerm}%`];
+                query = { user_name: { $regex: regex } };
                 break;
             case 'phone':
-                query = `SELECT * FROM user_data WHERE phone_number ILIKE $1 ORDER BY updated_at DESC`;
-                values = [`%${searchTerm}%`];
+                query = { phone_number: { $regex: regex } };
                 break;
             case 'tags':
-                query = `SELECT * FROM user_data WHERE $1 = ANY(tags) ORDER BY updated_at DESC`;
-                values = [searchTerm];
+                query = { tags: searchTerm };
                 break;
             default: // all
-                query = `
-                    SELECT * FROM user_data
-                    WHERE user_name ILIKE $1 OR phone_number ILIKE $1 OR $1 = ANY(tags)
-                    ORDER BY updated_at DESC
-                `;
-                values = [`%${searchTerm}%`];
+                query = {
+                    $or: [
+                        { user_name: { $regex: regex } },
+                        { phone_number: { $regex: regex } },
+                        { tags: searchTerm }
+                    ]
+                };
         }
 
         try {
-            const result = await this.pool.query(query, values);
-            return result.rows;
+            const users = await collection.find(query).sort({ updated_at: -1 }).toArray();
+            return users.map(user => {
+                user.chatId = user.chat_id;
+                user.phoneNumber = user.phone_number;
+                return user;
+            });
         } catch (error) {
-            console.error('Error searching user data:', error);
+            console.error('Error searching user data in MongoDB:', error);
             throw error;
         }
     }
@@ -227,62 +200,85 @@ class DatabaseService {
     // Message logs operations
     async logMessage(messageData) {
         if (!this.initialized) throw new Error('Database not initialized');
+        const collection = this.db.collection('message_logs');
 
-        const query = `
-            INSERT INTO message_logs (message_id, chat_id, sender_name, message_content, message_type, response_content)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (message_id) DO NOTHING
-            RETURNING *
-        `;
-
-        const values = [
-            messageData.messageId,
-            messageData.chatId,
-            messageData.senderName,
-            messageData.messageContent,
-            messageData.messageType || 'text',
-            messageData.responseContent || null
-        ];
+        const doc = {
+            message_id: messageData.messageId,
+            chat_id: messageData.chatId,
+            sender_name: messageData.senderName,
+            message_content: messageData.messageContent,
+            message_type: messageData.messageType || 'text',
+            response_content: messageData.responseContent || null,
+            timestamp: new Date(),
+            processed: false
+        };
 
         try {
-            const result = await this.pool.query(query, values);
-            return result.rows[0];
+            await collection.updateOne(
+                { message_id: messageData.messageId },
+                { $setOnInsert: doc },
+                { upsert: true }
+            );
+            return await collection.findOne({ message_id: messageData.messageId });
         } catch (error) {
-            console.error('Error logging message:', error);
+            console.error('Error logging message in MongoDB:', error);
             throw error;
         }
     }
 
     async getMessageStats() {
         if (!this.initialized) throw new Error('Database not initialized');
+        const collection = this.db.collection('message_logs');
 
-        const queries = {
-            totalMessages: 'SELECT COUNT(*) as count FROM message_logs',
-            todayMessages: 'SELECT COUNT(*) as count FROM message_logs WHERE DATE(timestamp) = CURRENT_DATE',
-            uniqueUsers: 'SELECT COUNT(DISTINCT chat_id) as count FROM message_logs',
-            topChatters: `
-                SELECT chat_id, COUNT(*) as message_count
-                FROM message_logs
-                WHERE DATE(timestamp) = CURRENT_DATE
-                GROUP BY chat_id
-                ORDER BY message_count DESC
-                LIMIT 5
-            `
-        };
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
 
         try {
-            const stats = {};
-            for (const [key, query] of Object.entries(queries)) {
-                const result = await this.pool.query(query);
-                if (key === 'topChatters') {
-                    stats[key] = result.rows;
-                } else {
-                    stats[key] = result.rows[0].count;
+            const totalMessages = await collection.countDocuments({});
+            const todayMessages = await collection.countDocuments({
+                timestamp: { $gte: todayStart, $lte: todayEnd }
+            });
+
+            const uniqueUsersList = await collection.distinct('chat_id');
+            const uniqueUsers = uniqueUsersList.length;
+
+            const topChattersResult = await collection.aggregate([
+                {
+                    $match: {
+                        timestamp: { $gte: todayStart, $lte: todayEnd }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$chat_id',
+                        message_count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { message_count: -1 }
+                },
+                {
+                    $limit: 5
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        chat_id: '$_id',
+                        message_count: 1
+                    }
                 }
-            }
-            return stats;
+            ]).toArray();
+
+            return {
+                totalMessages,
+                todayMessages,
+                uniqueUsers,
+                topChatters: topChattersResult
+            };
         } catch (error) {
-            console.error('Error getting message stats:', error);
+            console.error('Error getting message stats in MongoDB:', error);
             throw error;
         }
     }
@@ -290,20 +286,24 @@ class DatabaseService {
     // Command operations
     async logCommand(chatId, commandType, commandData) {
         if (!this.initialized) throw new Error('Database not initialized');
+        const collection = this.db.collection('bot_commands');
 
-        const query = `
-            INSERT INTO bot_commands (chat_id, command_type, command_data)
-            VALUES ($1, $2, $3)
-            RETURNING *
-        `;
-
-        const values = [chatId, commandType, JSON.stringify(commandData)];
+        const doc = {
+            chat_id: chatId,
+            command_type: commandType,
+            command_data: commandData,
+            created_at: new Date(),
+            processed: false
+        };
 
         try {
-            const result = await this.pool.query(query, values);
-            return result.rows[0];
+            const result = await collection.insertOne(doc);
+            return {
+                _id: result.insertedId,
+                ...doc
+            };
         } catch (error) {
-            console.error('Error logging command:', error);
+            console.error('Error logging command in MongoDB:', error);
             throw error;
         }
     }
@@ -316,8 +316,8 @@ class DatabaseService {
         const data = userData.data_json || {};
 
         return `*${index}. ${userData.user_name || 'Unknown'}*
-📱 ${userData.chatId}
-📞 ${userData.phoneNumber || 'No phone'}
+📱 ${userData.chat_id || userData.chatId}
+📞 ${userData.phone_number || userData.phoneNumber || 'No phone'}
 🏷️ Tags: ${tags}
 📅 Last updated: ${new Date(userData.updated_at).toLocaleDateString()}
 📊 Data: ${Object.keys(data).length > 0 ? JSON.stringify(data, null, 2).substring(0, 200) + '...' : 'No additional data'}
@@ -327,9 +327,9 @@ class DatabaseService {
 
     // Close database connection
     async close() {
-        if (this.pool) {
-            await this.pool.end();
-            console.log('✅ Database connection closed');
+        if (this.client) {
+            await this.client.close();
+            console.log('✅ MongoDB connection closed');
         }
     }
 }
