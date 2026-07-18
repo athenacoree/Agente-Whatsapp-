@@ -169,7 +169,7 @@ function startWaha() {
     }
 }
 
-async function waitForWaha(url, maxRetries = 30) {
+async function waitForWaha(url, maxRetries = 120) {
     console.log(`⏳ Waiting for internal WAHA service to start at ${url}...`);
     for (let i = 1; i <= maxRetries; i++) {
         try {
