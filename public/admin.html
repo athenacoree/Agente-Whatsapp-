@@ -64,6 +64,7 @@
         <a href="#personality" onclick="switchTab('personality')"><i class="bi bi-chat-quote"></i> Personalidad AI</a>
         <a href="#policies" onclick="switchTab('policies')"><i class="bi bi-shield-lock"></i> Políticas y Registro</a>
         <a href="#outbound" onclick="switchTab('outbound')"><i class="bi bi-broadcast"></i> Campañas Outbound</a>
+        <a href="#bot-whatsapp" onclick="switchTab('bot-whatsapp')"><i class="bi bi-robot"></i> Registro de WhatsApp</a>
     </div>
 
     <!-- Main Content -->
@@ -662,6 +663,82 @@
                         </div>
                         <button type="submit" class="btn btn-primary px-4">Guardar Políticas</button>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bot WhatsApp Registration Section -->
+        <div id="section-bot-whatsapp" class="tab-section d-none">
+            <h2 class="mb-4">🤖 Configuración del Bot de WhatsApp</h2>
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0"><i class="bi bi-phone"></i> Registro del Número del Bot</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <p class="fw-bold text-muted mb-1">Número actual:</p>
+                                <h4 id="bot-registered-phone" class="text-primary">Ninguno registrado ❌</h4>
+                            </div>
+
+                            <hr>
+
+                            <h6 class="fw-bold mb-3">─── REGISTRAR NUEVO NÚMERO ───</h6>
+                            <form id="bot-register-form" class="mb-3">
+                                <div class="mb-3">
+                                    <label class="form-label">Número de Teléfono (con código de país, ej: +1234567890)</label>
+                                    <input type="text" class="form-control" id="bot-input-phone" placeholder="+1234567890" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100" id="btn-request-verify">Enviar solicitud de verificación</button>
+                            </form>
+
+                            <form id="bot-verify-form" class="d-none mb-3">
+                                <div class="mb-3">
+                                    <label class="form-label">Código de verificación (6 dígitos)</label>
+                                    <input type="text" class="form-control text-center fs-4 font-monospace" id="bot-input-code" placeholder="______" maxlength="6" required>
+                                </div>
+                                <button type="submit" class="btn btn-success w-100" id="btn-verify-code">Verificar Código</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0"><i class="bi bi-activity"></i> Estado de Conexión & Estadísticas</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <span class="fw-bold text-muted d-block mb-1">Estado de la conexión:</span>
+                                <span class="badge bg-danger fs-6" id="bot-connection-status">Desconectado</span>
+                            </div>
+
+                            <div class="mb-4">
+                                <span class="fw-bold text-muted d-block mb-2">📊 Estadísticas de Uso del Bot:</span>
+                                <ul class="list-group list-group-flush">
+                                    <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0">
+                                        <span>Mensajes enviados:</span>
+                                        <span class="badge bg-primary rounded-pill" id="bot-stat-sent">0</span>
+                                    </li>
+                                    <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0">
+                                        <span>Mensajes recibidos:</span>
+                                        <span class="badge bg-success rounded-pill" id="bot-stat-received">0</span>
+                                    </li>
+                                    <li class="list-group-item d-flex justify-content-between align-items-center bg-transparent px-0">
+                                        <span>Usuarios activos:</span>
+                                        <span class="badge bg-info rounded-pill" id="bot-stat-users">0</span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-warning flex-fill" onclick="reconnectBot()"><i class="bi bi-arrow-clockwise"></i> Reconectar bot</button>
+                                <button class="btn btn-danger flex-fill" onclick="disconnectBot()"><i class="bi bi-power"></i> Desconectar</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1590,6 +1667,114 @@
             }
         }
 
+        // Bot WhatsApp Registration AJAX logic
+        async function fetchBotStatus() {
+            try {
+                const res = await fetch('/api/admin/bot/status');
+                const data = await res.json();
+                if (data.success && data.data) {
+                    const botData = data.data;
+                    const phoneEl = document.getElementById('bot-registered-phone');
+                    const statusEl = document.getElementById('bot-connection-status');
+
+                    if (botData.phoneNumber) {
+                        phoneEl.innerHTML = `${botData.phoneNumber} ${botData.verified ? '<span class="text-success">✅ (verificado)</span>' : '<span class="text-warning">⚠️ (pendiente)</span>'}`;
+                    } else {
+                        phoneEl.innerHTML = 'Ninguno registrado ❌';
+                    }
+
+                    if (botData.connected) {
+                        statusEl.innerText = '✅ Bot conectado y funcionando';
+                        statusEl.className = 'badge bg-success fs-6';
+                    } else {
+                        statusEl.innerText = '❌ Bot desconectado';
+                        statusEl.className = 'badge bg-danger fs-6';
+                    }
+
+                    document.getElementById('bot-stat-sent').innerText = botData.stats.sent;
+                    document.getElementById('bot-stat-received').innerText = botData.stats.received;
+                    document.getElementById('bot-stat-users').innerText = botData.stats.users;
+                }
+            } catch (err) {
+                console.error('Failed to fetch bot status:', err);
+            }
+        }
+
+        document.getElementById('bot-register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phoneNumber = document.getElementById('bot-input-phone').value.trim();
+            try {
+                const res = await fetch('/api/admin/bot/register/request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phoneNumber })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Código de verificación SMS enviado por WhatsApp/SMS. Ingrésalo a continuación.');
+                    document.getElementById('bot-verify-form').classList.remove('d-none');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al solicitar registro: ' + err.message);
+            }
+        });
+
+        document.getElementById('bot-verify-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('bot-input-code').value.trim();
+            try {
+                const res = await fetch('/api/admin/bot/register/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('¡Número registrado y bot conectado exitosamente!');
+                    document.getElementById('bot-verify-form').classList.add('d-none');
+                    document.getElementById('bot-register-form').reset();
+                    fetchBotStatus();
+                } else {
+                    alert('Error de verificación: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error al verificar: ' + err.message);
+            }
+        });
+
+        async function reconnectBot() {
+            try {
+                const res = await fetch('/api/admin/bot/connect', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Intento de reconexión del bot iniciado.');
+                    fetchBotStatus();
+                } else {
+                    alert('Error al reconectar: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error de red al reconectar: ' + err.message);
+            }
+        }
+
+        async function disconnectBot() {
+            if (!confirm('¿Estás seguro de desconectar el bot? Esto detendrá el envío y recepción de mensajes.')) return;
+            try {
+                const res = await fetch('/api/whatsapp/sessions/default', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Bot desconectado correctamente.');
+                    fetchBotStatus();
+                } else {
+                    alert('Error al desconectar: ' + data.error);
+                }
+            } catch (err) {
+                alert('Error de red al desconectar: ' + err.message);
+            }
+        }
+
         // Initialize polling and configurations on startup
         fetchStats();
         fetchMongoStats();
@@ -1598,8 +1783,10 @@
         loadSettings();
         fetchSessions();
         searchUsers();
+        fetchBotStatus();
 
         setInterval(fetchStats, 5000); // Poll general stats every 5s
+        setInterval(fetchBotStatus, 5000); // Poll bot registration status every 5s
         setInterval(fetchMongoStats, 10000); // Poll MongoDB Atlas stats every 10s
         setInterval(fetchSessions, 10000); // Poll sessions list every 10s
     </script>

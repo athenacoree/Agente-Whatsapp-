@@ -80,7 +80,17 @@ class DatabaseService {
                 processed BOOLEAN DEFAULT FALSE
             );
 
+            -- Bot config table for storing persistent bot-specific configuration (like registered bot number)
+            CREATE TABLE IF NOT EXISTS bot_config (
+                id SERIAL PRIMARY KEY,
+                key VARCHAR(255) UNIQUE NOT NULL,
+                value TEXT,
+                verified BOOLEAN DEFAULT FALSE,
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             -- Create indexes for better performance
+            CREATE INDEX IF NOT EXISTS idx_bot_config_key ON bot_config(key);
             CREATE INDEX IF NOT EXISTS idx_user_data_chat_id ON user_data(chat_id);
             CREATE INDEX IF NOT EXISTS idx_message_logs_chat_id ON message_logs(chat_id);
             CREATE INDEX IF NOT EXISTS idx_message_logs_timestamp ON message_logs(timestamp);
@@ -323,6 +333,41 @@ class DatabaseService {
 📊 Data: ${Object.keys(data).length > 0 ? JSON.stringify(data, null, 2).substring(0, 200) + '...' : 'No additional data'}
 
 ---`;
+    }
+
+    // Bot config operations
+    async getBotConfig(key) {
+        if (!this.initialized) throw new Error('Database not initialized');
+        const query = 'SELECT * FROM bot_config WHERE key = $1';
+        try {
+            const result = await this.pool.query(query, [key]);
+            return result.rows[0] || null;
+        } catch (error) {
+            console.error('Error getting bot config:', error);
+            throw error;
+        }
+    }
+
+    async setBotConfig(key, value, verified = false) {
+        if (!this.initialized) throw new Error('Database not initialized');
+        const query = `
+            INSERT INTO bot_config (key, value, verified, registered_at)
+            VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (key)
+            DO UPDATE SET
+                value = EXCLUDED.value,
+                verified = EXCLUDED.verified,
+                registered_at = CURRENT_TIMESTAMP
+            RETURNING *
+        `;
+        const values = [key, value, verified];
+        try {
+            const result = await this.pool.query(query, values);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Error setting bot config:', error);
+            throw error;
+        }
     }
 
     // Close database connection

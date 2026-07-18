@@ -369,6 +369,178 @@ app.post('/api/grok/config', express.json(), (req, res) => {
     }
 });
 
+// Endpoint to obtain bot registration and connection status
+app.get('/api/admin/bot/status', async (req, res) => {
+    try {
+        if (!bot) {
+            return res.status(503).json({ error: 'Bot is not initialized' });
+        }
+
+        // Get status from database
+        const dbConfig = await bot.activeDatabaseService.getBotConfig('bot_phone_number');
+        const wahaStatus = await bot.wahaService.getBotStatus();
+
+        // Count messages sent, received, and unique active users
+        let messagesSent = 0;
+        let messagesReceived = 0;
+        let activeUsers = 0;
+
+        if (bot.activeDatabaseService) {
+            try {
+                // Get general logs stats
+                const stats = await bot.activeDatabaseService.getMessageStats();
+                messagesReceived = parseInt(stats.totalMessages) || 0;
+                activeUsers = parseInt(stats.uniqueUsers) || 0;
+
+                // For sent, check message logs where response_content is not null
+                if (bot.activeDatabaseService.pool) {
+                    const sentRes = await bot.activeDatabaseService.pool.query(
+                        'SELECT COUNT(*) as count FROM message_logs WHERE response_content IS NOT NULL'
+                    );
+                    messagesSent = parseInt(sentRes.rows[0].count) || 0;
+                } else if (bot.activeDatabaseService.db) {
+                    const sentRes = await new Promise((resolve, reject) => {
+                        bot.activeDatabaseService.db.get(
+                            'SELECT COUNT(*) as count FROM message_logs WHERE response_content IS NOT NULL',
+                            (err, row) => {
+                                if (err) reject(err);
+                                else resolve(row);
+                            }
+                        );
+                    });
+                    messagesSent = parseInt(sentRes.count) || 0;
+                }
+            } catch (statsErr) {
+                console.error('Error fetching message count for bot status:', statsErr.message);
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                registered: !!dbConfig,
+                phoneNumber: dbConfig ? dbConfig.value : null,
+                verified: dbConfig ? !!dbConfig.verified : false,
+                connected: wahaStatus.connected,
+                sessionId: wahaStatus.sessionId,
+                status: wahaStatus.status,
+                stats: {
+                    sent: messagesSent,
+                    received: messagesReceived,
+                    users: activeUsers
+                }
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Request verification code to register new bot number
+app.post('/api/admin/bot/register/request', express.json(), async (req, res) => {
+    try {
+        const { phoneNumber } = req.body;
+        if (!phoneNumber) {
+            return res.status(400).json({ error: 'Phone number is required' });
+        }
+
+        if (!bot) {
+            return res.status(503).json({ error: 'Bot is not initialized' });
+        }
+
+        const cleanPhone = phoneNumber.replace('+', '').trim();
+        const result = await bot.wahaService.requestRegistration(cleanPhone);
+
+        // Store intermediate state in database
+        await bot.activeDatabaseService.setBotConfig('bot_phone_number', phoneNumber, false);
+
+        res.json({
+            success: true,
+            data: result
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Verify registration code
+app.post('/api/admin/bot/register/verify', express.json(), async (req, res) => {
+    try {
+        const { code } = req.body;
+        if (!code) {
+            return res.status(400).json({ error: 'Verification code is required' });
+        }
+
+        if (!bot) {
+            return res.status(503).json({ error: 'Bot is not initialized' });
+        }
+
+        // Get temporary number from db
+        const dbConfig = await bot.activeDatabaseService.getBotConfig('bot_phone_number');
+        if (!dbConfig) {
+            return res.status(400).json({ error: 'No phone number registration in progress' });
+        }
+
+        const result = await bot.wahaService.verifyRegistration(dbConfig.value, code);
+
+        // Mark as verified in database
+        await bot.activeDatabaseService.setBotConfig('bot_phone_number', dbConfig.value, true);
+
+        // Auto-reconnect with the new registered number
+        await bot.wahaService.connectBot(dbConfig.value);
+
+        res.json({
+            success: true,
+            data: result
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get registration status
+app.get('/api/admin/bot/register/status', async (req, res) => {
+    try {
+        if (!bot) {
+            return res.status(503).json({ error: 'Bot is not initialized' });
+        }
+
+        const dbConfig = await bot.activeDatabaseService.getBotConfig('bot_phone_number');
+        res.json({
+            success: true,
+            data: {
+                phoneNumber: dbConfig ? dbConfig.value : null,
+                verified: dbConfig ? !!dbConfig.verified : false,
+                registeredAt: dbConfig ? dbConfig.registered_at : null
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Connect bot with registered number
+app.post('/api/admin/bot/connect', async (req, res) => {
+    try {
+        if (!bot) {
+            return res.status(503).json({ error: 'Bot is not initialized' });
+        }
+
+        const dbConfig = await bot.activeDatabaseService.getBotConfig('bot_phone_number');
+        if (!dbConfig) {
+            return res.status(400).json({ error: 'No registered number to connect' });
+        }
+
+        const result = await bot.wahaService.connectBot(dbConfig.value);
+        res.json({
+            success: true,
+            data: result
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Real-time system stats endpoint
 app.get('/api/admin/stats', async (req, res) => {
     try {
