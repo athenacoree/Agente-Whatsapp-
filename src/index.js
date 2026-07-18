@@ -4,9 +4,121 @@ const WABot = require('./bot');
 const mongoService = require('./mongoService');
 const settingsService = require('./settingsService');
 const path = require('path');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const axios = require('axios');
 
 const app = express();
 const PORT = 3010; // Fixed port as requested
+
+// Proxy middleware for WAHA endpoints
+app.use(async (req, res, next) => {
+    const isBotApi = req.path.startsWith('/api/mongo') ||
+                      req.path.startsWith('/api/whatsapp') ||
+                      req.path.startsWith('/api/admin') ||
+                      req.path.startsWith('/api/grok');
+
+    const isWahaPath = (req.path.startsWith('/api/') && !isBotApi) ||
+                       req.path.startsWith('/dashboard') ||
+                       req.path.startsWith('/swagger') ||
+                       req.path === '/'; // waha status check
+
+    if (isWahaPath) {
+        try {
+            const wahaUrl = `http://localhost:3012${req.originalUrl}`;
+            console.log(`[PROXY] Forwarding ${req.method} ${req.originalUrl} to WAHA at ${wahaUrl}`);
+
+            // Forward headers
+            const headers = { ...req.headers };
+            delete headers.host; // let axios handle Host header
+
+            // Forward request to WAHA using axios with stream
+            const response = await axios({
+                method: req.method,
+                url: wahaUrl,
+                headers: headers,
+                data: req, // Pipe raw request stream
+                params: req.query,
+                responseType: 'stream',
+                validateStatus: () => true
+            });
+
+            // Forward status and headers
+            res.status(response.status);
+            Object.entries(response.headers).forEach(([key, val]) => {
+                res.setHeader(key, val);
+            });
+
+            // Pipe response back to the client
+            response.data.pipe(res);
+        } catch (error) {
+            console.error('[PROXY] Error forwarding request to WAHA:', error.message);
+            res.status(502).json({ error: 'Failed to communicate with internal WAHA service' });
+        }
+    } else {
+        next();
+    }
+});
+
+let wahaProcess = null;
+
+function startWaha() {
+    // Check if we are in the devlikeapro/waha container environment
+    // WAHA is compiled into /app/dist/main.js or /app/dist/src/main.js
+    let wahaPath = '/app/dist/main.js';
+    if (!fs.existsSync(wahaPath)) {
+        wahaPath = '/app/dist/src/main.js';
+    }
+
+    if (fs.existsSync(wahaPath)) {
+        console.log(`🚀 Found internal WAHA at ${wahaPath}. Spawning child process...`);
+
+        const wahaEnv = {
+            ...process.env,
+            PORT: '3012', // Run WAHA on an internal port
+            API_ENABLED: 'true',
+            ENGINE: process.env.WHATSAPP_DEFAULT_ENGINE || 'nowjs',
+            LOG_LEVEL: 'info',
+            WEBHOOK_URL: 'http://localhost:3010/webhook',
+            WEBHOOK_EVENTS: 'message,ack,message.any'
+        };
+
+        wahaProcess = spawn('node', [wahaPath], {
+            env: wahaEnv,
+            cwd: '/app',
+            stdio: 'inherit' // Inherit stdout/stderr to print WAHA's logs in Render's console
+        });
+
+        wahaProcess.on('error', (err) => {
+            console.error('❌ Failed to start WAHA child process:', err);
+        });
+
+        wahaProcess.on('exit', (code, signal) => {
+            console.log(`⚠️ WAHA child process exited with code ${code} and signal ${signal}`);
+        });
+
+        return true;
+    } else {
+        console.log('🔧 Internal WAHA files not found in /app. Running bot in standalone mode (no local WAHA spawn).');
+        return false;
+    }
+}
+
+async function waitForWaha(url, maxRetries = 30) {
+    console.log(`⏳ Waiting for internal WAHA service to start at ${url}...`);
+    for (let i = 1; i <= maxRetries; i++) {
+        try {
+            await axios.get(`${url}/api/sessions`, { timeout: 1000 });
+            console.log('✅ WAHA service is ready!');
+            return true;
+        } catch (err) {
+            // Wait 1 second before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+    }
+    console.warn('⚠️ WAHA service did not become ready in time. Proceeding in limited mode...');
+    return false;
+}
 
 // Global concurrent tracking state
 global.activeChatsCount = 0;
@@ -21,7 +133,7 @@ global.grokConfig = {
 
 // Load configuration
 const config = {
-    wahaApiUrl: process.env.WAHA_API_URL || 'http://localhost:3000',
+    wahaApiUrl: process.env.WAHA_API_URL || 'http://localhost:3010',
     wahaSessionName: process.env.WAHA_SESSION_NAME || 'default',
     wahaApiKey: process.env.WAHA_API_KEY,
     groqApiKey: process.env.GROQ_API_KEY,
@@ -704,6 +816,12 @@ async function startServer() {
 
         // Validate configuration
         validateConfig();
+
+        // Start internal WAHA if present
+        const hasWaha = startWaha();
+        if (hasWaha) {
+            await waitForWaha('http://localhost:3012');
+        }
 
         // Create and initialize bot
         console.log('🤖 Initializing WA Bot...');
