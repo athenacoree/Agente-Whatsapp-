@@ -1,18 +1,21 @@
 const { MongoClient } = require('mongodb');
+const settingsService = require('./settingsService');
 
 class MongoService {
     constructor() {
         this.connections = {}; // Store active MongoClient instances by config ID
-        this.configs = []; // Store DB configuration objects
-
-        // Default list of databases / configs if empty
-        this.loadDefaultConfigs();
     }
 
-    loadDefaultConfigs() {
-        // Typically, this can be loaded from a file or environment.
-        // We will store it in memory, allowing persistent updates during runtime.
-        this.configs = [];
+    get configs() {
+        return this.getConfigs();
+    }
+
+    getConfigs() {
+        const settings = settingsService.getSettings();
+        if (!settings.databases) {
+            settings.databases = [];
+        }
+        return settings.databases;
     }
 
     async addConfig(config) {
@@ -25,12 +28,10 @@ class MongoService {
             category: config.category || 'Otros', // 'Usuarios Registros', 'Chat Logs', 'Otros'
             limitMb: parseFloat(config.limitMb) || 512, // Default Atlas M0 limit
         };
-        this.configs.push(newConfig);
+        const configs = this.getConfigs();
+        configs.push(newConfig);
+        settingsService.saveSettings({ databases: configs });
         return newConfig;
-    }
-
-    getConfigs() {
-        return this.configs;
     }
 
     async removeConfig(id) {
@@ -42,7 +43,8 @@ class MongoService {
             }
             delete this.connections[id];
         }
-        this.configs = this.configs.filter(c => c.id !== id);
+        const configs = this.getConfigs().filter(c => c.id !== id);
+        settingsService.saveSettings({ databases: configs });
         return true;
     }
 
@@ -82,7 +84,7 @@ class MongoService {
     }
 
     async getDbStats(id) {
-        const config = this.configs.find(c => c.id === id);
+        const config = this.getConfigs().find(c => c.id === id);
         if (!config) {
             throw new Error(`Configuration not found for ID: ${id}`);
         }
@@ -136,14 +138,23 @@ class MongoService {
     }
 
     async getAllDbStats() {
-        const statsPromises = this.configs.map(config => this.getDbStats(config.id));
+        const statsPromises = this.getConfigs().map(config => this.getDbStats(config.id));
         return await Promise.all(statsPromises);
     }
 
-    // Dynamic storage methods based on category
+    // Dynamic storage methods based on category and dynamic routing
     async saveUserData(userData) {
-        // Find DB config destined for "Usuarios Registros"
-        const config = this.configs.find(c => c.category === 'Usuarios Registros');
+        const settings = settingsService.getSettings();
+        const routing = settings.databaseRouting || {};
+        const dbId = routing.users;
+
+        let config;
+        if (dbId) {
+            config = this.getConfigs().find(c => c.id === dbId);
+        }
+        if (!config) {
+            config = this.getConfigs().find(c => c.category === 'Usuarios Registros');
+        }
         if (!config) return null;
 
         try {
@@ -172,8 +183,17 @@ class MongoService {
     }
 
     async saveChatLog(chatLog) {
-        // Find DB config destined for "Chat Logs"
-        const config = this.configs.find(c => c.category === 'Chat Logs');
+        const settings = settingsService.getSettings();
+        const routing = settings.databaseRouting || {};
+        const dbId = routing.chatLogs;
+
+        let config;
+        if (dbId) {
+            config = this.getConfigs().find(c => c.id === dbId);
+        }
+        if (!config) {
+            config = this.getConfigs().find(c => c.category === 'Chat Logs');
+        }
         if (!config) return null;
 
         try {

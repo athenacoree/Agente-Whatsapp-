@@ -291,6 +291,34 @@ class WABot {
                 return;
             }
 
+            // 1. Access Control: Check if user is banned
+            const settings = global.aiSettings || {};
+            const userAccess = settings.userAccess || {};
+            const senderAccess = userAccess[parsedMessage.chatId] || 'normal';
+
+            if (senderAccess === 'banned') {
+                console.log(`🚫 Banned user attempted to send message: ${parsedMessage.chatId}`);
+                if (!parsedMessage.chatId.includes('@g.us')) {
+                    await this.wahaService.sendMessage(parsedMessage.chatId, "❌ Lo siento, tu acceso a este sistema ha sido revocado de manera manual por el administrador.");
+                }
+                return;
+            }
+
+            // 2. Administrator Command Interceptor
+            const cleanSenderPhone = parsedMessage.chatId.replace('@c.us', '').replace('@g.us', '');
+            const adminPhone = (settings.adminPhoneNumber || '').replace('+', '').trim();
+            const isAdmin = adminPhone && (cleanSenderPhone === adminPhone || parsedMessage.chatId === settings.adminPhoneNumber);
+
+            if (isAdmin && parsedMessage.content && parsedMessage.content.startsWith('.')) {
+                this.isProcessing.add(processingKey);
+                try {
+                    await this.handleAdminCommand(parsedMessage);
+                    return;
+                } finally {
+                    this.isProcessing.delete(processingKey);
+                }
+            }
+
             // Check if this is a bot command OR user is in an active menu state
             const userId = this.getConversationKey(parsedMessage.chatId, parsedMessage.from);
 
@@ -300,7 +328,7 @@ class WABot {
             if (profile && profile.data_json) {
                 profileData = typeof profile.data_json === 'string' ? JSON.parse(profile.data_json) : profile.data_json;
             }
-            const isRegistered = profileData.is_registered === true;
+            const isRegistered = profileData.is_registered === true || senderAccess === 'special';
 
             // Handle referral tracking before checking registration status
             const refMatch = parsedMessage.content.match(/ref_([a-zA-Z0-9@.-]+)/);
@@ -619,15 +647,15 @@ class WABot {
                     }
 
                     // Process task in background (non-blocking)
-                    this.processBackgroundTask(parsedMessage, userMessage, history, conversationKey);
+                    this.processBackgroundTask(parsedMessage, userMessage, history, conversationKey, profileData.country);
                     return;
                 }
 
                 // Show typing indicator
                 await this.sendTypingIndicator(parsedMessage.chatId);
 
-                // Process with AI Chat Service (with MCP tools)
-                const response = await this.aiChatService.processMessage(userMessage, history);
+                // Process with AI Chat Service (with MCP tools, passing user country)
+                const response = await this.aiChatService.processMessage(userMessage, history, profileData.country);
 
                 if (response.success) {
                     let responseText = response.content;
@@ -685,6 +713,7 @@ class WABot {
         } catch (error) {
             console.error('Error handling message:', error);
             global.activeChatsCount = Math.max(0, (global.activeChatsCount || 1) - 1);
+            await this.reportProblemToAdmin(`Error en handleIncomingMessage: ${error.stack || error.message}`);
         }
     }
 
@@ -2456,9 +2485,9 @@ Ahora que estás registrado, puedes chatear conmigo normalmente y usar todas mis
         return 'bot_phone';
     }
 
-    async processBackgroundTask(parsedMessage, userMessage, history, conversationKey) {
+    async processBackgroundTask(parsedMessage, userMessage, history, conversationKey, country = null) {
         try {
-            const response = await this.aiChatService.processMessage(userMessage, history);
+            const response = await this.aiChatService.processMessage(userMessage, history, country);
             if (response.success) {
                 let responseText = response.content;
                 if (response.usedTools) {
@@ -2487,6 +2516,126 @@ Ahora que estás registrado, puedes chatear conmigo normalmente y usar todas mis
             }
         } catch (error) {
             console.error('Error processing background task:', error);
+        }
+    }
+
+    async handleAdminCommand(parsedMessage) {
+        const text = parsedMessage.content.trim();
+        const parts = text.split(/\s+/);
+        const command = parts[0].toLowerCase();
+        const settings = global.aiSettings || {};
+
+        let response = '';
+        try {
+            switch (command) {
+                case '.verconfig':
+                    response = `⚙️ *Configuración Actual de la IA:*\n\n` +
+                               `• *Admin Phone:* ${settings.adminPhoneNumber || 'No establecido'}\n` +
+                               `• *Grok enabled:* ${!!global.grokConfig?.enabled}\n` +
+                               `• *Privacy Policy:* "${settings.privacyPolicy ? settings.privacyPolicy.substring(0, 100) + '...' : ''}"\n` +
+                               `• *Dictionary:* [${(settings.personality?.dictionary || []).join(', ')}]\n` +
+                               `• *Rules Count:* ${(settings.rules || []).length}\n` +
+                               `• *Banned Users:* ${Object.entries(settings.userAccess || {}).filter(([_, status]) => status === 'banned').map(([id]) => id).join(', ') || 'Ninguno'}`;
+                    break;
+
+                case '.setconfig':
+                    if (parts.length < 3) {
+                        response = `⚠️ *Uso:* \`.setconfig <adminPhoneNumber|privacyPolicy> <nuevo_valor>\``;
+                    } else {
+                        const key = parts[1];
+                        const val = parts.slice(2).join(' ');
+                        const updatedPayload = {};
+                        if (key === 'adminPhoneNumber' || key === 'privacyPolicy') {
+                            updatedPayload[key] = val;
+                            const settingsService = require('./settingsService');
+                            settingsService.saveSettings(updatedPayload);
+                            response = `✅ Configuración actualizada: *${key}* cambiado a: "${val}"`;
+                        } else {
+                            response = `⚠️ Llave no modificable directamente o no válida. Solo puedes modificar: *adminPhoneNumber*, *privacyPolicy*.`;
+                        }
+                    }
+                    break;
+
+                case '.ban':
+                    if (parts.length < 2) {
+                        response = `⚠️ *Uso:* \`.ban <tel_sin_mas_ni_arroba>\``;
+                    } else {
+                        let target = parts[1];
+                        if (!target.includes('@')) target += '@c.us';
+                        settings.userAccess = settings.userAccess || {};
+                        settings.userAccess[target] = 'banned';
+                        const settingsService = require('./settingsService');
+                        settingsService.saveSettings({ userAccess: settings.userAccess });
+                        response = `🚫 El usuario *${target}* ha sido *PROHIBIDO* (banned) exitosamente.`;
+                    }
+                    break;
+
+                case '.unban':
+                case '.unvip':
+                    if (parts.length < 2) {
+                        response = `⚠️ *Uso:* \`.unban <tel_sin_mas>\``;
+                    } else {
+                        let target = parts[1];
+                        if (!target.includes('@')) target += '@c.us';
+                        settings.userAccess = settings.userAccess || {};
+                        settings.userAccess[target] = 'normal';
+                        const settingsService = require('./settingsService');
+                        settingsService.saveSettings({ userAccess: settings.userAccess });
+                        response = `✅ El usuario *${target}* ha sido restablecido a estado *NORMAL* de acceso.`;
+                    }
+                    break;
+
+                case '.vip':
+                    if (parts.length < 2) {
+                        response = `⚠️ *Uso:* \`.vip <tel_sin_mas>\``;
+                    } else {
+                        let target = parts[1];
+                        if (!target.includes('@')) target += '@c.us';
+                        settings.userAccess = settings.userAccess || {};
+                        settings.userAccess[target] = 'special';
+                        const settingsService = require('./settingsService');
+                        settingsService.saveSettings({ userAccess: settings.userAccess });
+                        response = `⭐ El usuario *${target}* ha sido promovido a *ACCESO ESPECIAL* (VIP) exitosamente.`;
+                    }
+                    break;
+
+                case '.stats':
+                    const dbStats = this.activeDatabaseService ? await this.activeDatabaseService.getMessageStats() : { totalMessages: 0, todayMessages: 0, uniqueUsers: 0 };
+                    response = `📊 *Estadísticas de Live Interacción y Mensajes:*\n\n` +
+                               `• Mensajes Totales: ${dbStats.totalMessages}\n` +
+                               `• Mensajes Hoy: ${dbStats.todayMessages}\n` +
+                               `• Conexiones WAHA: Activa\n` +
+                               `• Uptime: ${Math.floor(process.uptime() / 60)} min`;
+                    break;
+
+                default:
+                    response = `🤖 *Comandos de Administrador Disponibles:*\n\n` +
+                               `• \`.verconfig\` - Ver estado de configuración\n` +
+                               `• \`.setconfig <key> <value>\` - Modificar parámetro\n` +
+                               `• \`.ban <tel>\` - Prohibir acceso\n` +
+                               `• \`.unban <tel>\` - Desbloquear o unban\n` +
+                               `• \`.vip <tel>\` - Otorgar acceso especial\n` +
+                               `• \`.stats\` - Ver estadísticas rápidas`;
+            }
+        } catch (err) {
+            response = `❌ Error procesando comando admin: ${err.message}`;
+        }
+
+        await this.wahaService.sendMessage(parsedMessage.chatId, response);
+    }
+
+    async reportProblemToAdmin(problemDetails) {
+        try {
+            const settings = global.aiSettings || {};
+            const adminPhone = settings.adminPhoneNumber;
+            if (adminPhone) {
+                let adminChatId = adminPhone;
+                if (!adminChatId.includes('@')) adminChatId += '@c.us';
+                await this.wahaService.sendMessage(adminChatId, `⚠️ *REPORTE DE PROBLEMA / EXCEPCIÓN DEL SISTEMA* ⚠️\n\n🕒 Fecha: ${new Date().toISOString()}\n\n📝 Detalles:\n${problemDetails}`);
+                console.log(`📬 Problem report forwarded to admin: ${adminChatId}`);
+            }
+        } catch (err) {
+            console.error('Failed to forward problem report to admin:', err.message);
         }
     }
 

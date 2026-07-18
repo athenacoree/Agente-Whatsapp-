@@ -12,12 +12,23 @@ class SettingsService {
                     angry: "Mantén un tono serio, directo y firme, pero respetuoso. Evita rodeos.",
                     sad: "Responde con empatía profunda, tono suave y consolador, demostrando comprensión y apoyo.",
                     formal: "Sé extremadamente formal, profesional y educado en tu respuesta."
-                }
+                },
+                countryPersonalities: [], // [{ country: string, prompt: string }]
+                dictionary: [], // [string]
+                rules: [] // [{ fieldName: string, variants: [{ name: string, text: string }] }]
             },
+            rules: [], // Top-level [{ fieldName: string, variants: [{ name: string, text: string }] }]
             privacyPolicy: "Acepto las políticas de seguridad y privacidad del sistema para crear mi cuenta y chatear normalmente.",
             outbound: {
                 numbers: [],
                 messageTemplate: "Hola, soy tu asistente virtual de IA. ¡Me encantaría ayudarte a comenzar! ¿Deseas registrarte con nosotros hoy?"
+            },
+            adminPhoneNumber: "",
+            userAccess: {}, // { [chatId]: "normal" | "banned" | "special" }
+            databases: [], // [{ id, name, uri, database, category, limitMb }]
+            databaseRouting: {
+                users: "",
+                chatLogs: ""
             }
         };
         this.init();
@@ -32,7 +43,25 @@ class SettingsService {
 
             if (fs.existsSync(this.filePath)) {
                 const data = fs.readFileSync(this.filePath, 'utf8');
-                this.settings = JSON.parse(data);
+                const loaded = JSON.parse(data);
+                this.settings = {
+                    ...this.settings,
+                    ...loaded,
+                    personality: {
+                        ...this.settings.personality,
+                        ...(loaded.personality || {})
+                    }
+                };
+                if (!this.settings.personality.countryPersonalities) this.settings.personality.countryPersonalities = [];
+                if (!this.settings.personality.dictionary) this.settings.personality.dictionary = [];
+                if (!this.settings.personality.rules) this.settings.personality.rules = [];
+                if (!this.settings.rules) this.settings.rules = [];
+                if (!this.settings.adminPhoneNumber) this.settings.adminPhoneNumber = "";
+                if (!this.settings.userAccess) this.settings.userAccess = {};
+                if (!this.settings.databases) this.settings.databases = [];
+                if (!this.settings.databaseRouting) {
+                    this.settings.databaseRouting = { users: "", chatLogs: "" };
+                }
             } else {
                 this.save();
             }

@@ -102,6 +102,143 @@ app.post('/api/mongo/config', express.json(), async (req, res) => {
     }
 });
 
+// Users and Access Control Endpoints
+app.get('/api/admin/users', async (req, res) => {
+    try {
+        if (!bot || !bot.activeDatabaseService) {
+            return res.json({ success: true, data: [] });
+        }
+        const { search } = req.query;
+        let users = [];
+        if (search) {
+            users = await bot.activeDatabaseService.searchUserData(search, 'all');
+        } else {
+            users = await bot.activeDatabaseService.getAllUserData(100, 0);
+        }
+
+        // Merge in the actual detail (data_json) if database returned only summary rows,
+        // and add access status from settings
+        const settings = settingsService.getSettings();
+        const userAccess = settings.userAccess || {};
+
+        const enrichedUsers = await Promise.all(users.map(async (u) => {
+            let fullUser = u;
+            if (!u.data_json) {
+                // Fetch full data if we just got a summary
+                const detail = await bot.activeDatabaseService.getUserData(u.chat_id);
+                if (detail) fullUser = detail;
+            }
+            return {
+                chat_id: fullUser.chat_id,
+                user_name: fullUser.user_name,
+                phone_number: fullUser.phone_number,
+                created_at: fullUser.created_at,
+                updated_at: fullUser.updated_at,
+                data_json: typeof fullUser.data_json === 'string' ? JSON.parse(fullUser.data_json) : (fullUser.data_json || {}),
+                tags: Array.isArray(fullUser.tags) ? fullUser.tags : (typeof fullUser.tags === 'string' ? JSON.parse(fullUser.tags) : []),
+                accessStatus: userAccess[fullUser.chat_id] || 'normal'
+            };
+        }));
+
+        res.json({ success: true, data: enrichedUsers });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/admin/users/:chatId/status', express.json(), (req, res) => {
+    try {
+        const { chatId } = req.params;
+        const { status } = req.body; // 'normal', 'banned', 'special'
+        if (!['normal', 'banned', 'special'].includes(status)) {
+            return res.status(400).json({ error: 'Status no válido' });
+        }
+
+        const settings = settingsService.getSettings();
+        settings.userAccess = settings.userAccess || {};
+        settings.userAccess[chatId] = status;
+
+        settingsService.saveSettings({ userAccess: settings.userAccess });
+        res.json({ success: true, data: settings.userAccess });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/admin/users/:chatId/add-contact', async (req, res) => {
+    try {
+        const { chatId } = req.params;
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+
+        // Get user details to retrieve name
+        const user = await bot.activeDatabaseService.getUserData(chatId);
+        const name = user ? user.user_name : 'Contacto Bot';
+        const cleanPhone = chatId.replace('@c.us', '').replace('@g.us', '');
+
+        const result = await bot.wahaService.addContact(cleanPhone, name);
+        res.json({ success: true, result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Multi-WhatsApp Session Management Endpoints
+app.get('/api/whatsapp/sessions', async (req, res) => {
+    try {
+        if (!bot || !bot.wahaService) {
+            return res.json({ success: true, data: [{ name: 'default', status: 'RUNNING' }] });
+        }
+        const sessions = await bot.wahaService.getSessions();
+        res.json({ success: true, data: sessions });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/whatsapp/sessions', express.json(), async (req, res) => {
+    try {
+        const { sessionName } = req.body;
+        if (!sessionName) {
+            return res.status(400).json({ error: 'Session name is required' });
+        }
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+        const result = await bot.wahaService.startSession(sessionName);
+        res.json({ success: true, result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/whatsapp/sessions/:session', async (req, res) => {
+    try {
+        const { session } = req.params;
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+        const result = await bot.wahaService.stopSession(session);
+        res.json({ success: true, result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/whatsapp/qr/:session', async (req, res) => {
+    try {
+        const { session } = req.params;
+        if (!bot || !bot.wahaService) {
+            return res.status(503).json({ error: 'Bot or WAHA service not ready' });
+        }
+        const qrData = await bot.wahaService.getSessionQr(session);
+        res.json({ success: true, qr: qrData });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/mongo/config', (req, res) => {
     res.json({ success: true, data: mongoService.getConfigs() });
 });

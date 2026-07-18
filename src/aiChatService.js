@@ -55,7 +55,7 @@ When users ask questions or make requests in natural language (Indonesian or Eng
 Respond in the same language as the user (Indonesian or English). Be conversational and helpful!`;
     }
 
-    getDynamicSystemPrompt() {
+    getDynamicSystemPrompt(country = null) {
         const settings = global.aiSettings || {
             personality: {
                 centralPrompt: "Eres un asistente de IA amigable y empático para WhatsApp. Te adaptas al tono de conversación del usuario.",
@@ -64,15 +64,49 @@ Respond in the same language as the user (Indonesian or English). Be conversatio
                     angry: "Mantén un tono serio, directo y firme, pero respetuoso. Evita rodeos.",
                     sad: "Responde con empatía profunda, tono suave y consolador, demostrando comprensión y apoyo.",
                     formal: "Sé extremadamente formal, profesional y educado en tu respuesta."
-                }
+                },
+                countryPersonalities: [],
+                dictionary: [],
+                rules: []
             }
         };
 
-        const central = settings.personality.centralPrompt;
+        let central = settings.personality.centralPrompt;
         const tones = settings.personality.tones || {};
+
+        // 1. Incorporate country-specific personality if matched
+        if (country && settings.personality && settings.personality.countryPersonalities && settings.personality.countryPersonalities.length > 0) {
+            const matchedCP = settings.personality.countryPersonalities.find(cp =>
+                cp.country && cp.country.toLowerCase() === country.toLowerCase()
+            );
+            if (matchedCP) {
+                central += `\n\nCOUNTRY-SPECIFIC ADAPTATION FOR ${country.toUpperCase()}:\n${matchedCP.prompt}`;
+            }
+        }
+
+        // 2. Incorporate dictionary/vocabulary rules
+        let dictionaryPrompt = "";
+        if (settings.personality && settings.personality.dictionary && settings.personality.dictionary.length > 0) {
+            dictionaryPrompt = `\n\nVOCABULARY AND LOCAL PHRASES: You can and should enrich your messages with these terms/phrases where appropriate: ${settings.personality.dictionary.join(', ')}`;
+        }
+
+        // 3. Incorporate rules & laws variants
+        let rulesPrompt = "";
+        if (settings.rules && settings.rules.length > 0) {
+            rulesPrompt = `\n\nRULES AND LAWS FOR BUSINESS LOGIC:\n`;
+            settings.rules.forEach(rule => {
+                if (rule.variants && rule.variants.length > 0) {
+                    rule.variants.forEach(variant => {
+                        rulesPrompt += `- [Section: ${rule.fieldName}] (${variant.name}): ${variant.text}\n`;
+                    });
+                }
+            });
+        }
 
         return `SYSTEM DIRECTIVES & PERSONALITY:
 ${central}
+${dictionaryPrompt}
+${rulesPrompt}
 
 DYNAMIC TONE ADAPTATION INSTRUCTIONS:
 Analyze the user's message tone or emotional state. You must adopt the matching sub-personality tone below for your reply:
@@ -86,9 +120,9 @@ Ensure your core helpfulness, capabilities, and language preference are preserve
 ${this.systemPrompt}`;
     }
 
-    async processMessage(userMessage, conversationHistory = []) {
+    async processMessage(userMessage, conversationHistory = [], country = null) {
         try {
-            const dynamicPrompt = this.getDynamicSystemPrompt();
+            const dynamicPrompt = this.getDynamicSystemPrompt(country);
 
             // Prepare conversation history with system prompt
             const messages = [
